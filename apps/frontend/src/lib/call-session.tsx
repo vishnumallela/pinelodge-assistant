@@ -13,6 +13,7 @@ import {
   buildReceptionistTools,
   CALLER_PROMPTS,
   GREETING,
+  TRANSCRIPTION_HINT,
 } from "@/lib/receptionist-agent";
 
 /**
@@ -93,6 +94,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     instructions,
     tools,
     greeting: GREETING,
+    transcriptionPrompt: TRANSCRIPTION_HINT,
     onToolCall: ({ name }) =>
       setFeed((f) => [...f, { kind: "tool", id: crypto.randomUUID(), name, status: "running" }]),
     onToolResult: ({ name }) =>

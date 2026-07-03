@@ -45,6 +45,8 @@ export interface TurnDetectionConfig {
   threshold?: number;
   silence_duration_ms?: number;
   prefix_padding_ms?: number;
+  /** server_vad: ms of caller silence before the model re-engages. */
+  idle_timeout_ms?: number;
 }
 
 export interface VoiceTokenInfo {
@@ -62,6 +64,8 @@ export interface UseVoiceAgentOptions {
   instructions?: string;
   tools?: VoiceFunctionTool[];
   turnDetection?: TurnDetectionConfig;
+  /** Domain vocabulary hint for the transcription model (names, jargon). */
+  transcriptionPrompt?: string;
   /** If set, the agent speaks an opening line right after connect. */
   greeting?: string;
   onToolCall?: (info: { name: string; args: Record<string, unknown> }) => void;
@@ -216,24 +220,31 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
         tool_choice: "auto",
         audio: {
           input: {
-            // Language pin: the API docs state supplying ISO-639-1 improves
-            // transcription accuracy and latency.
-            transcription: { model: cfg.transcribeModel, language: "en" },
+            // Language pin (ISO-639-1) improves accuracy and latency per the
+            // API docs; the prompt supplies domain vocabulary so proper
+            // names transcribe correctly.
+            transcription: {
+              model: cfg.transcribeModel,
+              language: "en",
+              ...(o.transcriptionPrompt ? { prompt: o.transcriptionPrompt } : {}),
+            },
             // Noise reduction is OFF by API default; without it, ambient
             // noise fires speech_started while the agent talks and the server
             // cancels her mid-word. far_field is the documented profile for
             // laptop and room microphones (near_field is for headsets).
             noise_reduction: { type: "far_field" },
             turn_detection: o.turnDetection ?? {
-              // Tuned for noisy environments per the API docs: a 0.7
-              // threshold requires clearly-voiced audio to activate (so
-              // chatter and echo stop interrupting the agent), and an 800ms
-              // silence window keeps mid-thought pauses inside the turn.
-              // Real barge-in still works — it just takes actual speech.
+              // Tuned for noisy rooms per the API's VAD guide (0.7-0.8
+              // threshold recommended; semantic_vad exposes no such knob —
+              // verified against gpt-realtime-2). 800ms of silence ends a
+              // turn, so mid-thought pauses survive; after 10s of caller
+              // silence the model re-engages instead of dead air. Barge-in
+              // stays on — it just takes actual speech, not chatter.
               type: "server_vad",
               threshold: 0.7,
               prefix_padding_ms: 300,
               silence_duration_ms: 800,
+              idle_timeout_ms: 10000,
               create_response: true,
               interrupt_response: true,
             },

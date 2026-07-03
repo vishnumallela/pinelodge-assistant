@@ -6,6 +6,13 @@ export const AGENT_NAME = "Sarah";
 
 export const GREETING = `Thank you for calling ${FACILITY_NAME}, this is ${AGENT_NAME}. How can I help you today?`;
 
+/** Domain vocabulary for the transcription model, so proper names and
+ *  facility terms transcribe correctly on a phone-quality line. */
+export const TRANSCRIPTION_HINT =
+  `Front desk call for ${FACILITY_NAME}, an assisted living community in Texas. ` +
+  "Expect staff names Sheri, Mira, Richa, and Dessa, and terms like Medicaid, " +
+  "admissions, billing, resident, voicemail, tour, and callback number.";
+
 /**
  * Sarah's instructions are purely conversational: personality, call flow, and
  * when to use each tool. Every business decision — routing, availability,
@@ -56,6 +63,9 @@ export function buildInstructions(): string {
     "",
     "# Unclear audio",
     "Only act on clear audio. If a turn is unclear, partial, or noisy, ask once for a repeat. Do not guess and do not call tools on unclear input.",
+    "",
+    "# Quiet line",
+    "If the caller goes quiet and you are prompted after a long pause, check in once: ask if they are still there. If there is still no reply, say goodbye and call end_call.",
     "",
     "# Boundaries",
     "- You are not a nurse or doctor. Never give medical advice; care concerns route to nursing.",
