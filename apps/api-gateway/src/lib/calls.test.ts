@@ -70,6 +70,8 @@ describe("screening", () => {
       const c = await startCall(db);
       const r = await recordScreening(db, c.id, cls);
       expect(r.action).toBe("decline_and_end");
+      expect(r.instruction).toContain("end_call");
+      expect((await getCallDetail(db, c.id))!.call.transferOutcome).toBe("declined");
     }
   });
 

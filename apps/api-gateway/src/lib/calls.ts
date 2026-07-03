@@ -75,14 +75,28 @@ export type Screening = "legitimate" | "spam" | "scam" | "emergency";
 export interface ScreeningInstruction {
   classification: Screening;
   action: "continue" | "decline_and_end" | "emergency";
+  instruction: string;
 }
 
 /** The application's response to each screening outcome — policy, not prompt. */
-const SCREENING_ACTIONS: Record<Screening, ScreeningInstruction["action"]> = {
-  legitimate: "continue",
-  spam: "decline_and_end",
-  scam: "decline_and_end",
-  emergency: "emergency",
+const SCREENING_POLICY: Record<
+  Screening,
+  { action: ScreeningInstruction["action"]; instruction: string }
+> = {
+  legitimate: { action: "continue", instruction: "Proceed with the call." },
+  spam: {
+    action: "decline_and_end",
+    instruction: "Politely decline, say goodbye, then immediately call end_call to hang up.",
+  },
+  scam: {
+    action: "decline_and_end",
+    instruction: "Politely decline, say goodbye, then immediately call end_call to hang up.",
+  },
+  emergency: {
+    action: "emergency",
+    instruction:
+      "Emergency workflow: if the caller is off-site, tell them to hang up and dial 911 now. Then call route_call with target emergency.",
+  },
 };
 
 export async function recordScreening(
@@ -92,8 +106,9 @@ export async function recordScreening(
 ): Promise<ScreeningInstruction> {
   const patch: Partial<typeof call.$inferInsert> = { screening: classification };
   if (classification === "emergency") patch.urgency = "emergency";
+  if (classification === "spam" || classification === "scam") patch.transferOutcome = "declined";
   await db.update(call).set(patch).where(eq(call.id, id));
-  return { classification, action: SCREENING_ACTIONS[classification] };
+  return { classification, ...SCREENING_POLICY[classification] };
 }
 
 /* ── caller information ──────────────────────────────────────────────── */
