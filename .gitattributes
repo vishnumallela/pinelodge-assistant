@@ -1,0 +1,4 @@
+# Vendored third-party skills: keep upstream content byte-for-byte,
+# exempt from whitespace checks.
+.agents/skills/** -whitespace
+.claude/skills/** -whitespace

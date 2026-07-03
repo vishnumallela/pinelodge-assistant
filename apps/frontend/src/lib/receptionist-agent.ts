@@ -26,7 +26,7 @@ export function buildInstructions(): string {
     "# Tools",
     "- get_facility_info: facts about the community (address, hours, visiting, dining, parking). Use it for general questions; never invent facility details.",
     "- screen_call: classify the call once its nature is clear: legitimate, spam, scam, or emergency. Then follow the returned action exactly — continue; decline_and_end (politely decline, say goodbye, end_call); emergency (switch to the emergency steps).",
-    "- save_caller_info: save details the moment the caller shares them — name, callback number, reason, resident name, relationship, preferred callback time, urgency, requested staff. Call it incrementally; the response tells you what is still missing.",
+    "- save_caller_info: after you have gathered the caller's details in conversation, save them in one call — name, callback number, reason, plus resident, relationship, callback time, urgency, or requested staff if learned. One save per call unless new information surfaces later.",
     "- check_availability: office hours and who is on shift right now. Call it before routing so you can set expectations naturally.",
     "- route_call: once you have the required details, call this with exactly one route target. The system routes the call and returns what happened plus the exact follow-through — do what it says. Never promise a destination before the tool returns.",
     "- complete_transfer: after you announce a transfer, call this immediately to hand the line off. It ends your side of the call.",
@@ -34,11 +34,12 @@ export function buildInstructions(): string {
     "- end_call: say goodbye first, then call this to hang up.",
     "",
     "# Conversation flow (every call)",
+    "Never call tools before the caller has told you why they are calling. The greeting is just a greeting.",
     "1. Greet the caller and ask how you can help.",
     "2. Screen: call screen_call as soon as the caller's purpose is clear.",
-    "3. Collect: caller name, callback number, and reason for calling are required before routing whenever reasonably possible. Resident name, relationship, and preferred callback time when relevant. Weave questions in naturally — never fire several at once.",
+    "3. Collect: caller name, callback number, and reason for calling are required before routing whenever reasonably possible. Resident name, relationship, and preferred callback time when relevant. Weave questions in naturally — never fire several at once. Gather everything first, then save once with save_caller_info.",
     "4. Check availability with check_availability.",
-    "5. Classify: pick exactly one route target and call route_call — on every call, even when you will answer the question yourself.",
+    "5. Classify: once the caller's need is clear, pick exactly one route target and call route_call. For a pure question you will answer yourself, use target general_question at the moment you answer it.",
     "   - admissions: tours, moving in, pricing questions.",
     "   - billing: invoices, insurance, Medicaid.",
     "   - escalation: complaints, or asking for the executive director.",
@@ -78,7 +79,7 @@ export interface ReceptionistToolOptions {
   getCallId: () => string | null;
   /** Invoked after any tool persists state, so the console can refresh. */
   onStateChange: () => void;
-  /** Invoked when the assistant hangs up via end_call. */
+  /** Request a hangup once the assistant finishes speaking (never mid-word). */
   onEndCall: () => void;
 }
 
@@ -127,7 +128,7 @@ export function buildReceptionistTools(opts: ReceptionistToolOptions): VoiceFunc
       type: "function",
       name: "save_caller_info",
       description:
-        "Persist caller details as soon as they are shared. Call incrementally with whatever is new; the response lists the required details still missing (caller name, callback number, reason).",
+        "Persist the caller's details in ONE call after you have gathered them in conversation: name, callback number, and reason together (plus resident, relationship, and anything else you learned). Do not call this per fragment. Call it again only if genuinely new information surfaces later.",
       parameters: {
         type: "object",
         properties: {
@@ -213,8 +214,7 @@ export function buildReceptionistTools(opts: ReceptionistToolOptions): VoiceFunc
       handler: async () => {
         const result = await orpcClient.calls.handoff({ callId: requireCall() });
         opts.onStateChange();
-        // Let the data channel deliver the tool result before hanging up.
-        setTimeout(() => opts.onEndCall(), 1200);
+        opts.onEndCall();
         return result;
       },
     },
@@ -258,8 +258,7 @@ export function buildReceptionistTools(opts: ReceptionistToolOptions): VoiceFunc
         required: [],
       },
       handler: () => {
-        // Give the data channel a beat to deliver the tool result, then hang up.
-        setTimeout(() => opts.onEndCall(), 800);
+        opts.onEndCall();
         return { ok: true };
       },
     },

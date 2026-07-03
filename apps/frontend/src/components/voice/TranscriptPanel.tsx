@@ -1,7 +1,21 @@
 import { memo, useState } from "react";
-import { Check, Copy } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Message, MessageContent } from "@/components/ui/message";
+import {
+  ArrowRightLeft,
+  CalendarClock,
+  Check,
+  Copy,
+  Info,
+  NotebookPen,
+  PhoneForwarded,
+  PhoneOff,
+  ShieldCheck,
+  Voicemail,
+  type LucideIcon,
+} from "lucide-react";
+import { Bubble, BubbleContent } from "@/components/ui/bubble";
+import { Button } from "@/components/ui/button";
+import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
+import { Message, MessageContent, MessageFooter } from "@/components/ui/message";
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -10,32 +24,56 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
-export interface TranscriptMessage {
-  id: string;
-  role: "user" | "assistant";
-  text: string;
-}
+import { Spinner } from "@/components/ui/spinner";
+import type { FeedItem } from "@/lib/call-session";
+
+/** Presentation for each tool the assistant can run mid-call. */
+const TOOL_META: Record<string, { running: string; done: string; icon: LucideIcon }> = {
+  get_facility_info: {
+    running: "Looking up community info",
+    done: "Looked up community info",
+    icon: Info,
+  },
+  screen_call: { running: "Screening the call", done: "Call screened", icon: ShieldCheck },
+  save_caller_info: {
+    running: "Noting caller details",
+    done: "Caller details saved",
+    icon: NotebookPen,
+  },
+  check_availability: {
+    running: "Checking the schedule",
+    done: "Schedule checked",
+    icon: CalendarClock,
+  },
+  route_call: { running: "Routing the call", done: "Call routed", icon: ArrowRightLeft },
+  complete_transfer: {
+    running: "Transferring the line",
+    done: "Line transferred",
+    icon: PhoneForwarded,
+  },
+  leave_voicemail: { running: "Saving the voicemail", done: "Voicemail saved", icon: Voicemail },
+  end_call: { running: "Ending the call", done: "Call ended", icon: PhoneOff },
+};
 
 /**
- * The conversation transcript, built on MessageScroller: each user turn is a
- * scroll anchor so a new exchange starts near the top of the viewport, streams
- * grow into the screen while the reader is at the live edge, and reopening a
- * saved call lands on the last meaningful turn instead of the absolute bottom.
+ * The live conversation: completed turns interleaved with the tool activity
+ * that produced them, plus the assistant's speaking/thinking state. Built on
+ * the shadcn conversation primitives — Message/Bubble for turns, Marker for
+ * inline activity, MessageScroller for live-edge scrolling.
  */
 export function TranscriptPanel({
-  messages,
-  liveUserText,
-  liveAgentText,
+  items,
+  agentName,
+  speaking,
   thinking,
   className,
 }: {
-  messages: TranscriptMessage[];
-  liveUserText?: string;
-  liveAgentText?: string;
+  items: FeedItem[];
+  agentName: string;
+  speaking?: boolean;
   thinking?: boolean;
   className?: string;
 }) {
-  const streaming = Boolean(liveAgentText) || Boolean(thinking);
   return (
     <MessageScrollerProvider
       autoScroll
@@ -45,27 +83,41 @@ export function TranscriptPanel({
       <MessageScroller className={className} style={{ viewTransitionName: "transcript" }}>
         <MessageScrollerViewport className="scrollbar-subtle">
           <MessageScrollerContent
-            aria-busy={streaming}
-            className="mx-auto w-full max-w-3xl gap-4 px-4 pb-40 pt-5 md:px-5"
+            aria-busy={Boolean(speaking || thinking)}
+            className="mx-auto w-full max-w-3xl gap-4 px-4 pb-40 pt-6 md:px-5"
           >
-            {messages.map((m) => (
-              <MessageScrollerItem key={m.id} messageId={m.id} scrollAnchor={m.role === "user"}>
-                <Row from={m.role} text={m.text} />
+            {items.map((item) =>
+              item.kind === "message" ? (
+                <MessageScrollerItem
+                  key={item.id}
+                  messageId={item.id}
+                  scrollAnchor={item.role === "user"}
+                >
+                  <Turn from={item.role} text={item.text} />
+                </MessageScrollerItem>
+              ) : (
+                <MessageScrollerItem key={item.id} messageId={item.id}>
+                  <ToolMarker name={item.name} status={item.status} />
+                </MessageScrollerItem>
+              ),
+            )}
+            {speaking ? (
+              <MessageScrollerItem messageId="speaking">
+                <Marker role="status" className="[animation:message-in_0.28s_var(--ease-out)]">
+                  <MarkerIcon>
+                    <SpeakingBars />
+                  </MarkerIcon>
+                  <MarkerContent className="shimmer">{agentName} is speaking&hellip;</MarkerContent>
+                </Marker>
               </MessageScrollerItem>
-            ))}
-            {liveUserText ? (
-              <MessageScrollerItem messageId="live-user">
-                <Row from="user" text={liveUserText} pending />
-              </MessageScrollerItem>
-            ) : null}
-            {liveAgentText ? (
-              <MessageScrollerItem messageId="live-agent">
-                <Row from="assistant" text={liveAgentText} pending />
-              </MessageScrollerItem>
-            ) : null}
-            {thinking && !liveAgentText ? (
+            ) : thinking ? (
               <MessageScrollerItem messageId="thinking">
-                <ThinkingDots />
+                <Marker role="status" className="[animation:message-in_0.28s_var(--ease-out)]">
+                  <MarkerIcon>
+                    <Spinner />
+                  </MarkerIcon>
+                  <MarkerContent className="shimmer">Thinking&hellip;</MarkerContent>
+                </Marker>
               </MessageScrollerItem>
             ) : null}
           </MessageScrollerContent>
@@ -76,73 +128,91 @@ export function TranscriptPanel({
   );
 }
 
-const Row = memo(function Row({
-  from,
-  text,
-  pending,
-}: {
-  from: "user" | "assistant";
-  text: string;
-  pending?: boolean;
-}) {
-  const isUser = from === "user";
+const Turn = memo(function Turn({ from, text }: { from: "user" | "assistant"; text: string }) {
+  if (from === "user") {
+    return (
+      <Message align="end" className="[animation:message-in_0.28s_var(--ease-out)]">
+        <MessageContent>
+          <Bubble variant="muted">
+            <BubbleContent className="whitespace-pre-wrap rounded-3xl px-4 py-2.5 text-[15px] leading-7">
+              {text}
+            </BubbleContent>
+          </Bubble>
+        </MessageContent>
+      </Message>
+    );
+  }
   return (
-    <Message
-      align={isUser ? "end" : "start"}
-      className={cn(
-        "group/message [animation:message-in_0.28s_var(--ease-out)]",
-        pending && "opacity-60",
-      )}
-    >
+    <Message align="start" className="[animation:message-in_0.28s_var(--ease-out)]">
       <MessageContent>
-        <div
-          className={cn(
-            "whitespace-pre-wrap text-[15.5px] leading-7 text-foreground",
-            isUser
-              ? "ml-auto w-fit max-w-[75%] rounded-3xl bg-accent px-4 py-2.5"
-              : "max-w-[68ch] text-pretty",
-          )}
-        >
-          {text}
-        </div>
-        {!isUser && !pending && <CopyButton text={text} />}
+        <Bubble variant="ghost">
+          <BubbleContent className="max-w-[68ch] whitespace-pre-wrap text-pretty text-[15.5px] leading-7 text-foreground">
+            {text}
+          </BubbleContent>
+        </Bubble>
+        <MessageFooter className="opacity-0 transition-opacity group-hover/message:opacity-100 [@media(hover:none)]:opacity-100">
+          <CopyButton text={text} />
+        </MessageFooter>
       </MessageContent>
     </Message>
   );
 });
 
-function ThinkingDots() {
+const ToolMarker = memo(function ToolMarker({
+  name,
+  status,
+}: {
+  name: string;
+  status: "running" | "done";
+}) {
+  const meta = TOOL_META[name];
+  const label = meta ? (status === "running" ? meta.running : meta.done) : name;
+  const Icon = meta?.icon ?? Info;
   return (
-    <Message align="start">
-      <MessageContent>
-        <output aria-label="Thinking" className="flex items-center gap-1 py-1.5">
-          {[0, 1, 2].map((i) => (
-            <span
-              key={i}
-              className="h-1.5 w-1.5 rounded-full bg-muted-foreground"
-              style={{ animation: `pinelodge-dot 1.2s ease-in-out ${i * 0.16}s infinite` }}
-            />
-          ))}
-        </output>
-      </MessageContent>
-    </Message>
+    <Marker
+      role={status === "running" ? "status" : undefined}
+      className="[animation:message-in_0.28s_var(--ease-out)]"
+    >
+      <MarkerIcon>{status === "running" ? <Spinner /> : <Icon className="size-3.5" />}</MarkerIcon>
+      <MarkerContent className={status === "running" ? "shimmer" : undefined}>
+        {status === "running" ? <>{label}&hellip;</> : label}
+      </MarkerContent>
+    </Marker>
+  );
+});
+
+function SpeakingBars() {
+  return (
+    <span className="flex size-4 items-end justify-center gap-[2.5px]" aria-hidden>
+      {[0, 1, 2, 3].map((i) => (
+        <span
+          key={i}
+          className="w-[2.5px] rounded-full bg-muted-foreground"
+          style={{
+            height: "11px",
+            animation: `pinelodge-bar 1s ease-in-out ${i * 0.12}s infinite`,
+          }}
+        />
+      ))}
+    </span>
   );
 }
 
 function CopyButton({ text }: { text: string }) {
   const [done, setDone] = useState(false);
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
+      size="icon"
+      aria-label="Copy message"
+      className="size-7 rounded-lg text-muted-foreground"
       onClick={() => {
         void navigator.clipboard?.writeText(text);
         setDone(true);
         window.setTimeout(() => setDone(false), 1200);
       }}
-      aria-label="Copy message"
-      className="relative mt-1 grid size-8 place-items-center rounded-lg text-muted-foreground opacity-0 transition-[opacity,transform,scale,background-color,color] before:absolute before:-inset-1 active:scale-[0.96] pf-hover:bg-accent pf-hover:text-foreground group-hover/message:opacity-100 [@media(hover:none)]:opacity-100"
     >
-      {done ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-    </button>
+      {done ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+    </Button>
   );
 }

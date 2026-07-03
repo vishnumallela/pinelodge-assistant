@@ -1,6 +1,13 @@
 @import "tailwindcss";
+@import "shadcn/tailwind.css";
 
-@custom-variant pf-hover (@media (hover: hover) and (pointer: fine));
+@custom-variant pf-hover {
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      @slot;
+    }
+  }
+}
 
 :root {
   --background: #ffffff;
@@ -156,6 +163,17 @@
   40% {
     opacity: 1;
     transform: translateY(-2px);
+  }
+}
+@keyframes pinelodge-bar {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
   }
 }
 

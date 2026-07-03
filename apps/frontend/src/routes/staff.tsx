@@ -5,6 +5,24 @@ import { orpc, orpcClient } from "@/lib/orpc";
 import { Page } from "@/components/layout/Page";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
 type Staff = Awaited<ReturnType<typeof orpcClient.staff.list>>[number];
@@ -60,7 +78,7 @@ function toForm(s: Staff): FormState {
 
 export function StaffPage() {
   const qc = useQueryClient();
-  const { data: staff = [] } = useQuery(orpc.staff.list.queryOptions());
+  const { data: staff = [], isPending } = useQuery(orpc.staff.list.queryOptions());
   // null = nothing selected; "new" = creating; otherwise a staff id.
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
@@ -118,44 +136,54 @@ export function StaffPage() {
       description="Who calls can be routed to. Shift times are facility local (Central Time); changes apply to the next call."
     >
       <div className="flex flex-col gap-8">
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <th className="py-2 pr-4 font-medium">Name</th>
-              <th className="hidden py-2 pr-4 font-medium sm:table-cell">Role</th>
-              <th className="py-2 pr-4 font-medium">Department</th>
-              <th className="hidden py-2 pr-4 font-medium md:table-cell">Ext.</th>
-              <th className="hidden py-2 pr-4 font-medium md:table-cell">Shift</th>
-              <th className="py-2 text-right font-medium">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {staff.map((s) => (
-              <tr key={s.id} className="group relative border-b border-border/60">
-                <td className="py-3 pr-4">
-                  <button
-                    type="button"
-                    onClick={() => open(s)}
-                    className="font-medium text-foreground after:absolute after:inset-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    {s.name}
-                  </button>
-                </td>
-                <td className="hidden py-3 pr-4 text-muted-foreground sm:table-cell">{s.role}</td>
-                <td className="py-3 pr-4">{s.department}</td>
-                <td className="hidden py-3 pr-4 tabular-nums text-muted-foreground md:table-cell">
-                  {s.extension}
-                </td>
-                <td className="hidden py-3 pr-4 tabular-nums text-muted-foreground md:table-cell">
-                  {s.shiftStart}–{s.shiftEnd}
-                </td>
-                <td className="py-3 text-right text-muted-foreground">
-                  {s.active ? "Active" : "Inactive"}
-                </td>
-              </tr>
+        {isPending ? (
+          <div className="flex flex-col gap-3 pt-2">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <Skeleton key={i} className="h-10 w-full" />
             ))}
-          </tbody>
-        </table>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead className="hidden sm:table-cell">Role</TableHead>
+                <TableHead>Department</TableHead>
+                <TableHead className="hidden md:table-cell">Ext.</TableHead>
+                <TableHead className="hidden md:table-cell">Shift</TableHead>
+                <TableHead className="text-right">Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {staff.map((s) => (
+                <TableRow key={s.id} className="relative cursor-pointer">
+                  <TableCell className="font-medium">
+                    <button
+                      type="button"
+                      onClick={() => open(s)}
+                      className="after:absolute after:inset-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {s.name}
+                    </button>
+                  </TableCell>
+                  <TableCell className="hidden text-muted-foreground sm:table-cell">
+                    {s.role}
+                  </TableCell>
+                  <TableCell>{s.department}</TableCell>
+                  <TableCell className="hidden tabular-nums text-muted-foreground md:table-cell">
+                    {s.extension}
+                  </TableCell>
+                  <TableCell className="hidden tabular-nums text-muted-foreground md:table-cell">
+                    {s.shiftStart}–{s.shiftEnd}
+                  </TableCell>
+                  <TableCell className="text-right text-muted-foreground">
+                    {s.active ? "Active" : "Inactive"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
 
         {!editing && (
           <div>
@@ -167,7 +195,7 @@ export function StaffPage() {
 
         {editing && (
           <form
-            className="flex max-w-xl flex-col gap-4 border-t border-border pt-6"
+            className="flex max-w-xl flex-col gap-5 border-t border-border pt-6"
             onSubmit={(e) => {
               e.preventDefault();
               if (canSave) save.mutate();
@@ -178,40 +206,46 @@ export function StaffPage() {
             </h2>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Name">
+              <Field label="Name" htmlFor="staff-name">
                 <Input
+                  id="staff-name"
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                 />
               </Field>
-              <Field label="Role">
+              <Field label="Role" htmlFor="staff-role">
                 <Input
+                  id="staff-role"
                   value={form.role}
                   onChange={(e) => setForm({ ...form, role: e.target.value })}
                 />
               </Field>
-              <Field label="Department">
+              <Field label="Department" htmlFor="staff-department">
                 <Input
+                  id="staff-department"
                   value={form.department}
                   onChange={(e) => setForm({ ...form, department: e.target.value })}
                   placeholder="Admissions, Billing, Administration, Front Office, Nursing"
                 />
               </Field>
-              <Field label="Extension">
+              <Field label="Extension" htmlFor="staff-extension">
                 <Input
+                  id="staff-extension"
                   value={form.extension}
                   onChange={(e) => setForm({ ...form, extension: e.target.value })}
                 />
               </Field>
-              <Field label="Shift start">
+              <Field label="Shift start" htmlFor="staff-shift-start">
                 <Input
+                  id="staff-shift-start"
                   type="time"
                   value={form.shiftStart}
                   onChange={(e) => setForm({ ...form, shiftStart: e.target.value })}
                 />
               </Field>
-              <Field label="Shift end">
+              <Field label="Shift end" htmlFor="staff-shift-end">
                 <Input
+                  id="staff-shift-end"
                   type="time"
                   value={form.shiftEnd}
                   onChange={(e) => setForm({ ...form, shiftEnd: e.target.value })}
@@ -219,7 +253,8 @@ export function StaffPage() {
               </Field>
             </div>
 
-            <Field label="Working days">
+            <div className="flex flex-col gap-1.5">
+              <Label>Working days</Label>
               <div className="flex flex-wrap gap-1.5">
                 {DAYS.map(([key, label]) => {
                   const on = form.workingDays.includes(key);
@@ -237,7 +272,7 @@ export function StaffPage() {
                         })
                       }
                       className={cn(
-                        "h-8 rounded-md border px-3 text-xs font-medium transition-colors",
+                        "h-8 rounded-full border px-3.5 text-xs font-medium transition-colors",
                         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                         on
                           ? "border-foreground bg-foreground text-background"
@@ -249,39 +284,44 @@ export function StaffPage() {
                   );
                 })}
               </div>
-            </Field>
+            </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="When off shift, send calls to">
-                <select
-                  aria-label="Fallback destination"
+              <div className="flex flex-col gap-1.5">
+                <Label>When off shift, send calls to</Label>
+                <Select
                   value={form.fallbackDestination}
-                  onChange={(e) => setForm({ ...form, fallbackDestination: e.target.value })}
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onValueChange={(v) => setForm({ ...form, fallbackDestination: v })}
                 >
-                  <option value="voicemail">Voicemail</option>
-                  <option value="nursing">Nursing line</option>
-                  {staff
-                    .filter((s) => s.id !== selectedId)
-                    .map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                </select>
-              </Field>
-              <Field label="Status">
-                <label className="flex h-10 items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    aria-label="Active — can receive calls"
+                  <SelectTrigger aria-label="Fallback destination" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="voicemail">Voicemail</SelectItem>
+                    <SelectItem value="nursing">Nursing line</SelectItem>
+                    {staff
+                      .filter((s) => s.id !== selectedId)
+                      .map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="staff-active">Status</Label>
+                <div className="flex h-9 items-center gap-2.5">
+                  <Switch
+                    id="staff-active"
                     checked={form.active}
-                    onChange={(e) => setForm({ ...form, active: e.target.checked })}
-                    className="h-4 w-4 accent-foreground"
+                    onCheckedChange={(v) => setForm({ ...form, active: v })}
                   />
-                  Active — can receive calls
-                </label>
-              </Field>
+                  <span className="text-sm">
+                    {form.active ? "Active — can receive calls" : "Inactive"}
+                  </span>
+                </div>
+              </div>
             </div>
 
             <div className="flex items-center gap-2 pt-1">
@@ -310,11 +350,19 @@ export function StaffPage() {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  htmlFor,
+  children,
+}: {
+  label: string;
+  htmlFor: string;
+  children: React.ReactNode;
+}) {
   return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+    <div className="flex flex-col gap-1.5">
+      <Label htmlFor={htmlFor}>{label}</Label>
       {children}
-    </label>
+    </div>
   );
 }

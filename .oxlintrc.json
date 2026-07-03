@@ -55,7 +55,11 @@
       }
     },
     {
-      "files": ["**/layout/AppLayout.tsx"],
+      "files": [
+        "**/layout/AppLayout.tsx",
+        "**/ui/spinner.tsx",
+        "**/voice/TranscriptPanel.tsx"
+      ],
       "rules": {
         "jsx-a11y/prefer-tag-over-role": "off"
       }

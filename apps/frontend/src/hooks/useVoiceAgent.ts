@@ -163,6 +163,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
   });
   const userSpeakingRef = useRef(false); // is the user mid-utterance (VAD)
   const pendingToolResponseRef = useRef(false); // defer response.create until user stops
+  const activeResponseRef = useRef(false); // a model response is in flight
 
   const fail = useCallback((message: string) => {
     setError(message);
@@ -215,25 +216,30 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
         tool_choice: "auto",
         audio: {
           input: {
-            // Pinning the language (ISO-639-1) measurably improves both
-            // transcription accuracy and latency, and stops noise from being
-            // hallucinated as foreign-language fragments.
+            // Language pin: the API docs state supplying ISO-639-1 improves
+            // transcription accuracy and latency.
             transcription: { model: cfg.transcribeModel, language: "en" },
-            noise_reduction: { type: "near_field" },
+            // Noise reduction is OFF by API default; without it, ambient
+            // noise fires speech_started while the agent talks and the server
+            // cancels her mid-word. far_field is the documented profile for
+            // laptop and room microphones (near_field is for headsets).
+            noise_reduction: { type: "far_field" },
             turn_detection: o.turnDetection ?? {
-              // Semantic VAD ends the user's turn on meaning rather than a
-              // fixed silence timer. High eagerness keeps turn-taking snappy;
-              // semantic completion (not raw silence) is what guards against
-              // cutting callers off mid-sentence.
-              type: "semantic_vad",
-              eagerness: "high",
+              // Tuned for noisy environments per the API docs: a 0.7
+              // threshold requires clearly-voiced audio to activate (so
+              // chatter and echo stop interrupting the agent), and an 800ms
+              // silence window keeps mid-thought pauses inside the turn.
+              // Real barge-in still works — it just takes actual speech.
+              type: "server_vad",
+              threshold: 0.7,
+              prefix_padding_ms: 300,
+              silence_duration_ms: 800,
               create_response: true,
               interrupt_response: true,
             },
           },
           output: {
             voice: o.voice ?? cfg.voice,
-            speed: 1.0,
           },
         },
       },
@@ -275,10 +281,13 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
           output: typeof output === "string" ? output : JSON.stringify(output),
         },
       });
-      // "First word clipped" mitigation: if the user started speaking again
-      // while the tool ran, defer response.create until they stop. Otherwise
-      // the server clips the start of their next utterance.
-      if (userSpeakingRef.current) {
+      // Two races to avoid before asking for the follow-up response:
+      // - the user started speaking while the tool ran (creating now clips
+      //   the start of their utterance), or
+      // - VAD auto-created a response in the meantime (creating now collides
+      //   with the active response and the turn breaks).
+      // In both cases defer; speech_stopped / response.done fire it later.
+      if (userSpeakingRef.current || activeResponseRef.current) {
         pendingToolResponseRef.current = true;
       } else {
         sendEvent({ type: "response.create" });
@@ -314,7 +323,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
           setIsUserSpeaking(false);
           // Fire a tool-result response that we deferred while the user spoke
           // (mitigates the "first word clipped" race).
-          if (pendingToolResponseRef.current) {
+          if (pendingToolResponseRef.current && !activeResponseRef.current) {
             pendingToolResponseRef.current = false;
             sendEvent({ type: "response.create" });
           }
@@ -338,6 +347,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
         }
 
         case "response.created":
+          activeResponseRef.current = true;
           setIsAgentThinking(true);
           break;
 
@@ -375,7 +385,14 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
           break;
 
         case "response.done":
+          activeResponseRef.current = false;
           setIsAgentThinking(false);
+          // A tool finished while another response was active: request the
+          // follow-up now that the line is free (unless the user is talking).
+          if (pendingToolResponseRef.current && !userSpeakingRef.current) {
+            pendingToolResponseRef.current = false;
+            sendEvent({ type: "response.create" });
+          }
           break;
 
         case "error": {
@@ -465,6 +482,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
     greetedRef.current = false;
     pendingToolResponseRef.current = false;
     userSpeakingRef.current = false;
+    activeResponseRef.current = false;
 
     let tokenInfo: VoiceTokenInfo;
     try {
@@ -637,6 +655,13 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
         type: "conversation.item.create",
         item: { type: "message", role: "user", content: [{ type: "input_text", text: trimmed }] },
       });
+      // If a response is already in flight (e.g. a tool follow-up), creating
+      // another collides and the reply can ignore this message. Cancel the
+      // stale one so the reply is generated with this message in context.
+      if (activeResponseRef.current) {
+        sendEvent({ type: "response.cancel" });
+        sendEvent({ type: "output_audio_buffer.clear" });
+      }
       sendEvent({ type: "response.create" });
       // Typed input produces no transcription events, so record it directly.
       upsert(crypto.randomUUID(), { role: "user", text: trimmed, status: "completed" });

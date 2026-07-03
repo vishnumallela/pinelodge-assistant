@@ -1,4 +1,4 @@
-import { ShimmeringText } from "@/components/ui/shimmering-text";
+import { cn } from "@/lib/utils";
 import type { useVoiceAgent } from "@/hooks/useVoiceAgent";
 
 type Agent = ReturnType<typeof useVoiceAgent>;
@@ -29,19 +29,9 @@ export function CallStatus({ agent, agentName }: { agent: Agent; agentName: stri
   return (
     <>
       <output className="sr-only">{text}</output>
-      {shimmer ? (
-        <ShimmeringText
-          text={text}
-          duration={1.6}
-          startOnView={false}
-          className="text-xs"
-          aria-hidden
-        />
-      ) : (
-        <p className="text-xs text-muted-foreground" aria-hidden>
-          {text}
-        </p>
-      )}
+      <p className={cn("text-xs text-muted-foreground", shimmer && "shimmer")} aria-hidden>
+        {text}
+      </p>
     </>
   );
 }

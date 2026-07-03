@@ -8,18 +8,22 @@ export function formatDuration(seconds: number | null | undefined): string {
 import { FACILITY_TIMEZONE } from "./config";
 
 /** Timestamps render in facility time (with the zone shown), not viewer time,
- *  so the console reads consistently with schedules and routing decisions. */
+ *  so the console reads consistently with schedules and routing decisions.
+ *  Assembled from parts because ICU versions disagree on the joiner
+ *  ("Jul 3, 9:10 AM" vs "Jul 3 at 9:10 AM"). */
 export function formatDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("en-US", {
+  const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: FACILITY_TIMEZONE,
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
     timeZoneName: "short",
-  });
+  }).formatToParts(d);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("month")} ${get("day")}, ${get("hour")}:${get("minute")} ${get("dayPeriod")} ${get("timeZoneName")}`.trim();
 }
 
 /** "answered_directly" -> "Answered directly"; null/empty/"none" -> em dash. */

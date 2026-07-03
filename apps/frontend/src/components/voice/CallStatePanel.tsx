@@ -8,7 +8,7 @@ import { formatDuration, labelize } from "@/lib/format";
  */
 export function CallStatePanel({ call }: { call: LiveCall }) {
   return (
-    <div className="flex w-72 shrink-0 flex-col gap-6 overflow-y-auto border-l border-border px-5 py-6">
+    <div className="flex w-80 shrink-0 flex-col gap-7 overflow-y-auto border-l border-border/60 bg-sidebar/50 px-6 py-6">
       <Section title="Call">
         <Row
           label="Screening"
@@ -40,7 +40,9 @@ export function CallStatePanel({ call }: { call: LiveCall }) {
 
       {call.voicemail && (
         <Section title="Voicemail">
-          <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">{call.voicemail}</p>
+          <p className="rounded-lg bg-muted px-3 py-2.5 text-sm leading-6 text-foreground">
+            {call.voicemail}
+          </p>
         </Section>
       )}
 
@@ -60,18 +62,24 @@ export function CallStatePanel({ call }: { call: LiveCall }) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="flex flex-col gap-2.5">
-      <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</h2>
-      {children}
+      <h2 className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+        {title}
+      </h2>
+      <div className="flex flex-col gap-2">{children}</div>
     </section>
   );
 }
 
 function Row({ label, value }: { label: string; value: string | null | undefined }) {
+  const has = Boolean(value?.trim());
   return (
     <div className="flex items-baseline justify-between gap-3 text-sm">
       <span className="shrink-0 text-muted-foreground">{label}</span>
-      <span className="truncate text-right text-foreground" title={value ?? undefined}>
-        {value?.trim() ? value : "—"}
+      <span
+        className={has ? "truncate text-right text-foreground" : "text-right text-border"}
+        title={value ?? undefined}
+      >
+        {has ? value : "—"}
       </span>
     </div>
   );

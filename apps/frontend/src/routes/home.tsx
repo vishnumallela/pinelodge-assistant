@@ -4,19 +4,17 @@ import { VoiceOrb, type OrbState } from "@/components/voice/VoiceOrb";
 import { CallStatus } from "@/components/voice/CallChrome";
 import { SuggestionChips } from "@/components/voice/SuggestionChips";
 import { TranscriptPanel } from "@/components/voice/TranscriptPanel";
+import { CallHeader } from "@/components/voice/CallHeader";
 import { CallStatePanel } from "@/components/voice/CallStatePanel";
 import { Composer } from "@/components/voice/Composer";
 import { FACILITY_NAME } from "@/lib/config";
 
 export function HomePage() {
-  const { agent, agentName, callerPrompts, liveCall, lastCallId, startCall, endCall, send } =
+  const { agent, agentName, callerPrompts, feed, liveCall, lastCallId, startCall, endCall, send } =
     useCallSession();
 
-  const messages = agent.history
-    .filter((h) => h.status === "completed" && h.text.trim() !== "")
-    .map((h) => ({ id: h.id, role: h.role, text: h.text }));
   const inCall = agent.isConnected || agent.status === "connecting";
-  const empty = messages.length === 0;
+  const empty = feed.length === 0;
 
   const orbState: OrbState = agent.isConnected
     ? agent.isAgentSpeaking
@@ -74,10 +72,13 @@ export function HomePage() {
   return (
     <main className="flex min-h-0 flex-1">
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+        {liveCall && <CallHeader call={liveCall} connected={agent.isConnected} />}
         <TranscriptPanel
           className="min-h-0 flex-1"
-          messages={messages}
-          thinking={agent.isAgentThinking || agent.isAgentSpeaking}
+          items={feed}
+          agentName={agentName}
+          speaking={agent.isAgentSpeaking}
+          thinking={agent.isAgentThinking}
         />
         <div className="pointer-events-none absolute inset-x-0 bottom-0">
           <div className="h-16 bg-linear-to-t from-background to-transparent" />
@@ -89,7 +90,7 @@ export function HomePage() {
                   <CallStatus agent={agent} agentName={agentName} />
                 </div>
               )}
-              {agent.isConnected && messages.length === 0 && (
+              {agent.isConnected && feed.length === 0 && (
                 <div className="mb-3">
                   <SuggestionChips prompts={callerPrompts} onPick={send} />
                 </div>

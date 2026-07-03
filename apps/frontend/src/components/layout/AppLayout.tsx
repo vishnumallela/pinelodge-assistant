@@ -16,7 +16,6 @@ const NAV = [
   { label: "Staff", to: "/staff", icon: Users },
 ] as const;
 
-const row = "flex h-9 items-center gap-2.5 rounded-lg px-2 text-sm transition-colors";
 const iconBtn =
   "tap grid h-8 w-8 place-items-center rounded-lg text-muted-foreground transition-[color,background-color,transform] active:scale-[0.96] pf-hover:bg-accent pf-hover:text-foreground";
 
@@ -55,22 +54,25 @@ function Shell() {
           </span>
         </Link>
       </div>
-      <nav className="flex flex-col gap-0.5 px-2">
+      <nav className="flex flex-col gap-1 px-3 pt-1">
         {NAV.map((item) => (
           <Link
             key={item.to}
             to={item.to}
             activeOptions={{ exact: item.to === "/" }}
             onClick={closeMobile}
-            className={row}
+            className="flex h-10 items-center gap-3 rounded-full px-3.5 text-sm transition-colors"
             activeProps={{ className: "bg-accent font-medium text-foreground" }}
-            inactiveProps={{ className: "text-muted-foreground pf-hover:text-foreground" }}
+            inactiveProps={{
+              className: "text-muted-foreground pf-hover:bg-accent/60 pf-hover:text-foreground",
+            }}
           >
             <item.icon className="h-4.5 w-4.5" /> {item.label}
           </Link>
         ))}
       </nav>
       <div className="flex-1" />
+      <div className="mx-3 border-t border-border/60" />
       <UserFooter />
     </>
   );

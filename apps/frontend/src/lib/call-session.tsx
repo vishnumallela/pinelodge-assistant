@@ -24,6 +24,11 @@ import {
 
 export type LiveCall = NonNullable<Awaited<ReturnType<typeof orpcClient.calls.get>>>;
 
+/** One entry in the live conversation feed: a completed turn, or tool activity. */
+export type FeedItem =
+  | { kind: "message"; id: string; role: "user" | "assistant"; text: string }
+  | { kind: "tool"; id: string; name: string; status: "running" | "done" };
+
 interface CallSession {
   agent: UseVoiceAgentReturn;
   agentName: string;
@@ -31,6 +36,8 @@ interface CallSession {
   callerPrompts: string[];
   callId: string | null;
   liveCall: LiveCall | null;
+  /** Completed turns interleaved with tool activity, in arrival order. */
+  feed: FeedItem[];
   /** Set after a call ends, until the next one starts. */
   lastCallId: string | null;
   startCall: () => void;
@@ -55,6 +62,10 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const sentRef = useRef<Set<string>>(new Set());
   const seqRef = useRef(0);
 
+  // Conversation feed: completed turns + tool activity, in arrival order.
+  const [feed, setFeed] = useState<FeedItem[]>([]);
+  const feedSeenRef = useRef<Set<string>>(new Set());
+
   const refreshLiveCall = useCallback(() => {
     const id = callIdRef.current;
     if (id) void qc.invalidateQueries({ queryKey: orpc.calls.get.key({ input: { callId: id } }) });
@@ -62,12 +73,16 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 
   const endCallRef = useRef<() => void>(() => undefined);
 
+  // The assistant's end_call / complete_transfer request a hangup; we only
+  // disconnect once her audio has finished so goodbyes are never cut off.
+  const [hangupRequested, setHangupRequested] = useState(false);
+
   const tools = useMemo(
     () =>
       buildReceptionistTools({
         getCallId: () => callIdRef.current,
         onStateChange: refreshLiveCall,
-        onEndCall: () => endCallRef.current(),
+        onEndCall: () => setHangupRequested(true),
       }),
     [refreshLiveCall],
   );
@@ -78,8 +93,39 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     instructions,
     tools,
     greeting: GREETING,
+    onToolCall: ({ name }) =>
+      setFeed((f) => [...f, { kind: "tool", id: crypto.randomUUID(), name, status: "running" }]),
+    onToolResult: ({ name }) =>
+      setFeed((f) => {
+        const idx = f.findLastIndex(
+          (i) => i.kind === "tool" && i.name === name && i.status === "running",
+        );
+        if (idx === -1) return f;
+        const next = f.slice();
+        next[idx] = { ...(next[idx] as FeedItem & { kind: "tool" }), status: "done" };
+        return next;
+      }),
     onError: (m) => toast.error(m),
   });
+
+  // Fold newly completed turns into the feed, preserving arrival order
+  // relative to tool activity.
+  useEffect(() => {
+    const fresh = agent.history.filter(
+      (h) => h.status === "completed" && h.text.trim() !== "" && !feedSeenRef.current.has(h.id),
+    );
+    if (fresh.length === 0) return;
+    for (const h of fresh) feedSeenRef.current.add(h.id);
+    setFeed((f) => [
+      ...f,
+      ...fresh.map((h) => ({
+        kind: "message" as const,
+        id: h.id,
+        role: h.role,
+        text: h.text,
+      })),
+    ]);
+  }, [agent.history]);
 
   // Persist completed turns as they land; the (callId, entryId) key makes
   // retries idempotent server-side.
@@ -114,6 +160,27 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     }),
   );
 
+  // Complete a requested hangup only after the assistant is done speaking,
+  // with a hard cap in case audio events go missing.
+  useEffect(() => {
+    if (!hangupRequested) return;
+    if (agent.isAgentSpeaking || agent.isAgentThinking) return;
+    const grace = window.setTimeout(() => {
+      setHangupRequested(false);
+      endCallRef.current();
+    }, 600);
+    return () => window.clearTimeout(grace);
+  }, [hangupRequested, agent.isAgentSpeaking, agent.isAgentThinking]);
+
+  useEffect(() => {
+    if (!hangupRequested) return;
+    const cap = window.setTimeout(() => {
+      setHangupRequested(false);
+      endCallRef.current();
+    }, 15000);
+    return () => window.clearTimeout(cap);
+  }, [hangupRequested]);
+
   const startCall = useCallback(() => {
     if (agent.isConnected) return;
     void (async () => {
@@ -121,6 +188,9 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         const { callId: id } = await orpcClient.calls.start();
         sentRef.current = new Set();
         seqRef.current = 0;
+        feedSeenRef.current = new Set();
+        setFeed([]);
+        setHangupRequested(false);
         setLastCallId(null);
         setCallId(id);
         await agent.connect();
@@ -133,6 +203,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 
   const endCall = useCallback(() => {
     const id = callIdRef.current;
+    setHangupRequested(false);
     // Capture any turns that completed after the last effect ran.
     flushTranscript(agent.history);
     agent.disconnect();
@@ -168,12 +239,13 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       callerPrompts: CALLER_PROMPTS,
       callId,
       liveCall: liveCall ?? null,
+      feed,
       lastCallId,
       startCall,
       endCall,
       send,
     }),
-    [agent, userName, callId, liveCall, lastCallId, startCall, endCall, send],
+    [agent, userName, callId, liveCall, feed, lastCallId, startCall, endCall, send],
   );
 
   return <CallSessionContext.Provider value={value}>{children}</CallSessionContext.Provider>;
