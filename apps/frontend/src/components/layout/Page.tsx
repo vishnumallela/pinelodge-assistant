@@ -21,7 +21,7 @@ export function Page({
         <h1
           ref={headingRef}
           tabIndex={-1}
-          className="text-xl font-semibold tracking-tight focus:outline-none"
+          className="font-display text-[26px] font-normal leading-tight tracking-normal focus:outline-none"
         >
           {title}
         </h1>

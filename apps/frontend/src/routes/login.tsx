@@ -67,12 +67,14 @@ export function LoginPage() {
     <div className="grid min-h-dvh place-items-center bg-background px-4 py-10">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
-          <span className="grid h-11 w-11 place-items-center rounded-2xl bg-foreground text-background">
+          <span className="grid h-11 w-11 place-items-center rounded-full bg-foreground text-background">
             <AudioLines className="h-5 w-5" />
           </span>
           <div>
-            <h1 className="text-balance text-lg font-semibold tracking-tight">{PRODUCT_NAME}</h1>
-            <p className="mt-1 text-pretty text-sm text-muted-foreground">
+            <h1 className="font-display text-balance text-[30px] font-normal leading-tight tracking-normal">
+              {PRODUCT_NAME}
+            </h1>
+            <p className="mt-1.5 text-pretty text-sm text-muted-foreground">
               Front desk console for {FACILITY_NAME}.
             </p>
           </div>

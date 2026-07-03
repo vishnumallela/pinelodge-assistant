@@ -43,11 +43,11 @@ export function HomePage() {
     return (
       <main className="flex min-h-0 flex-1 flex-col items-center justify-center gap-6 px-4">
         <VoiceOrb state={orbState} size="lg" />
-        <div className="space-y-1.5 text-center">
-          <h1 className="text-balance text-[28px] font-semibold leading-tight tracking-tight text-foreground">
+        <div className="space-y-2 text-center">
+          <h1 className="font-display text-balance text-[40px] font-normal leading-[1.1] tracking-normal text-foreground">
             Incoming call console
           </h1>
-          <p className="mx-auto max-w-md text-pretty text-[15px] text-muted-foreground">
+          <p className="mx-auto max-w-md text-pretty text-[15px] leading-relaxed text-muted-foreground">
             Start a simulated call to {FACILITY_NAME}. You are the caller; {agentName} answers,
             gathers what the front desk needs, and routes the call.
           </p>

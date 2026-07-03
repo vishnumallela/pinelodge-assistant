@@ -489,14 +489,12 @@ void main() {
     vec3 ringColor = vec3(1.0); // White ring color
     color.rgb = 1.0 - (1.0 - color.rgb) * (1.0 - ringColor * totalRingAlpha);
 
+    // Map luminance through the two theme colors: highlights stay near-white
+    // with a hint of uColor1, mid-tones flow uColor1 -> uColor2, shadows sink
+    // to a deeper shade of uColor2.
     float lum = mix(color.r, 1.0 - color.r, uInverted);
-    float intensity = clamp((1.0 - lum) * 2.2, 0.0, 1.0);
-    float hue = fract(theta / (2.0 * PI) + uTime * 0.04 + radius * 0.12);
-    vec3 rainbow = hsv2rgb(vec3(hue, 0.85, 1.0));
-    vec3 lightBase = mix(vec3(1.0), rainbow, 0.30);
-    vec3 darkBase = mix(vec3(0.08), rainbow, 0.55);
-    vec3 base = mix(lightBase, darkBase, uInverted);
-    color.rgb = mix(base, rainbow, intensity);
+    vec3 highlight = mix(vec3(1.0), uColor1, 0.28);
+    color.rgb = colorRamp(1.0 - lum, highlight, uColor1, uColor2, uColor2 * 0.55);
 
     // Apply fade-in opacity
     color.a *= uOpacity;

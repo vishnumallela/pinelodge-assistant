@@ -9,7 +9,7 @@ export type OrbState = "idle" | "listening" | "thinking" | "speaking";
 
 const WRAP = { lg: "h-44 w-44", sm: "h-11 w-11" } as const;
 
-const ORB_COLORS: [string, string] = ["#3B82F6", "#A855F7"];
+const ORB_COLORS: [string, string] = ["#CADCFC", "#A0B9D1"];
 
 const ORB_FALLBACK = <span className="block h-full w-full rounded-full bg-foreground/10" />;
 

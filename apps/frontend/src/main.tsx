@@ -1,4 +1,5 @@
-import "@fontsource-variable/inter";
+import "@fontsource-variable/geist";
+import "@fontsource/instrument-serif";
 import "./styles/globals.css";
 
 import { StrictMode } from "react";

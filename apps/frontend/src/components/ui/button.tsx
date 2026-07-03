@@ -26,7 +26,7 @@ export interface ButtonProps extends React.ComponentProps<"button"> {
 export const Button = ({ className, variant = "primary", size = "md", ...props }: ButtonProps) => (
   <button
     className={cn(
-      "inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium",
+      "inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-full font-medium",
       "transition-[background-color,color,box-shadow,transform] duration-150 [transition-timing-function:var(--ease-out)]",
       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
       "active:scale-[0.96]",
