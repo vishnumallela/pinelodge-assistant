@@ -10,3 +10,4 @@ dist
 drizzle/.snapshot
 
 *.tsbuildinfo
+.playwright-cli

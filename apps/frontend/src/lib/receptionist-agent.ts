@@ -37,7 +37,7 @@ export function buildInstructions(): string {
     "2. Screen: call screen_call as soon as the caller's purpose is clear.",
     "3. Collect: caller name, callback number, and reason for calling are required before routing whenever reasonably possible. Resident name, relationship, and preferred callback time when relevant. Weave questions in naturally — never fire several at once.",
     "4. Check availability with check_availability.",
-    "5. Classify: pick exactly one route target and call route_call.",
+    "5. Classify: pick exactly one route target and call route_call — on every call, even when you will answer the question yourself.",
     "   - admissions: tours, moving in, pricing questions.",
     "   - billing: invoices, insurance, Medicaid.",
     "   - escalation: complaints, or asking for the executive director.",
@@ -170,7 +170,7 @@ export function buildReceptionistTools(opts: ReceptionistToolOptions): VoiceFunc
       type: "function",
       name: "route_call",
       description:
-        "Hand the call to the routing system with exactly one route target. The system decides the destination and returns the outcome: transfer (announce who you are connecting), voicemail (offer to take a message), answer (answer directly), or emergency.",
+        "Hand the call to the routing system with exactly one route target. The system decides the destination and returns the outcome: transfer (announce who you are connecting), voicemail (offer to take a message), answer (answer directly), or emergency. Call this on every call — including general questions you answer yourself — so the call record is complete.",
       parameters: {
         type: "object",
         properties: {

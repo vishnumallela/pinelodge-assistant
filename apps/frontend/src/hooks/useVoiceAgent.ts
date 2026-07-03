@@ -630,14 +630,17 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
 
   const sendText = useCallback(
     (text: string) => {
-      if (!text.trim()) return;
+      const trimmed = text.trim();
+      if (!trimmed) return;
       sendEvent({
         type: "conversation.item.create",
-        item: { type: "message", role: "user", content: [{ type: "input_text", text }] },
+        item: { type: "message", role: "user", content: [{ type: "input_text", text: trimmed }] },
       });
       sendEvent({ type: "response.create" });
+      // Typed input produces no transcription events, so record it directly.
+      upsert(crypto.randomUUID(), { role: "user", text: trimmed, status: "completed" });
     },
-    [sendEvent],
+    [sendEvent, upsert],
   );
 
   const interrupt = useCallback(() => {
