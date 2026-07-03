@@ -1,0 +1,29 @@
+{
+  "name": "@pinelodge/auth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --env-file=.env --hot server.ts",
+    "start": "bun --env-file=.env server.ts",
+    "build": "bun build server.ts --target=bun --outdir=dist --packages=external",
+    "lint": "oxlint .",
+    "format": "oxfmt . --ignore-path ../../.prettierignore",
+    "format:check": "oxfmt . --check --ignore-path ../../.prettierignore",
+    "typecheck": "tsc --noEmit",
+    "db:push": "bun --env-file=.env drizzle-kit push",
+    "db:generate": "bun --env-file=.env drizzle-kit generate",
+    "clean": "rm -rf dist drizzle .turbo node_modules"
+  },
+  "dependencies": {
+    "better-auth": "^1.6.14",
+    "drizzle-orm": "^0.38.0",
+    "postgres": "^3.4.5",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "drizzle-kit": "^0.30.0",
+    "typescript": "^5.6.0"
+  }
+}

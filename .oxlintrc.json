@@ -1,0 +1,77 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "react", "react-perf", "jsx-a11y", "import", "promise", "unicorn"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "warn",
+    "pedantic": "warn",
+    "restriction": "off",
+    "style": "off",
+    "nursery": "off"
+  },
+  "rules": {
+    "no-console": "off",
+    "no-debugger": "error",
+    "no-unused-vars": "off",
+    "typescript/no-unused-vars": "off",
+    "typescript/no-explicit-any": "warn",
+    "react/react-in-jsx-scope": "off",
+    "react/jsx-key": "error",
+    "react/no-array-index-key": "warn",
+    "max-lines-per-function": "off",
+    "max-params": "off",
+    "max-depth": "off",
+    "import/no-unassigned-import": "off",
+    "import/max-dependencies": "off",
+    "eslint/require-unicode-regexp": "off",
+    "unicorn/prefer-string-replace-all": "off",
+    "unicorn/no-useless-undefined": "off",
+    "unicorn/prefer-query-selector": "off",
+    "unicorn/prefer-top-level-await": "off",
+    "react-perf/jsx-no-new-object-as-prop": "off",
+    "react-perf/jsx-no-new-array-as-prop": "off",
+    "react-perf/jsx-no-new-function-as-prop": "off",
+    "unicorn/filename-case": "off",
+    "unicorn/no-null": "off",
+    "import/no-default-export": "off"
+  },
+  "overrides": [
+    {
+      "files": [
+        "**/routes/**/*.tsx",
+        "**/routes/**/*.ts",
+        "**/vite.config.ts",
+        "**/drizzle.config.ts"
+      ],
+      "rules": {
+        "import/no-default-export": "off"
+      }
+    },
+    {
+      "files": ["**/hooks/useVoiceAgent.ts"],
+      "rules": {
+        "unicorn/prefer-add-event-listener": "off"
+      }
+    },
+    {
+      "files": ["**/layout/AppLayout.tsx"],
+      "rules": {
+        "jsx-a11y/prefer-tag-over-role": "off"
+      }
+    }
+  ],
+  "env": {
+    "browser": true,
+    "node": true,
+    "es2024": true
+  },
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/.turbo/**",
+    "**/.output/**",
+    "**/node_modules/**",
+    "**/routeTree.gen.ts",
+    "**/drizzle/**"
+  ]
+}

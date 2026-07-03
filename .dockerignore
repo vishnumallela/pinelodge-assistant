@@ -1,0 +1,28 @@
+# Dependencies and build output (reinstalled/rebuilt inside the image)
+**/node_modules
+**/dist
+**/.turbo
+.vite
+
+# Secrets and local env (never bake into images; pass at run/build time)
+**/.env
+**/.env.local
+
+# VCS / tooling / editor
+.git
+.github
+.husky
+.vscode
+.idea
+.claude
+
+# Docs, logs, caches
+**/*.md
+**/*.log
+**/*.tsbuildinfo
+coverage
+.DS_Store
+
+# The Dockerfiles themselves
+**/Dockerfile
+.dockerignore

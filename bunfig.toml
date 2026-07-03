@@ -1,0 +1,7 @@
+[install]
+exact = false
+
+[install.scopes]
+
+[run]
+bun = true

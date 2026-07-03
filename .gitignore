@@ -1,0 +1,12 @@
+node_modules
+dist
+.turbo
+*.db
+*.db-shm
+*.db-wal
+.env
+.DS_Store
+.vite
+drizzle/.snapshot
+
+*.tsbuildinfo

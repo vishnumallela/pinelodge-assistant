@@ -1,0 +1,22 @@
+# oxfmt also respects this file. Keep formatter focused on JS/TS sources.
+node_modules
+dist
+.output
+.turbo
+.cache
+
+# Generated
+**/routeTree.gen.ts
+**/drizzle/**
+
+# oxfmt has poor support for these — leave them to other tools / editor config
+*.json
+*.jsonc
+*.toml
+*.yml
+*.yaml
+*.md
+*.html
+*.css
+docker-compose.yml
+.env*
