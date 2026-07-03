@@ -221,14 +221,12 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
             transcription: { model: cfg.transcribeModel, language: "en" },
             noise_reduction: { type: "near_field" },
             turn_detection: o.turnDetection ?? {
-              // Balanced server VAD: threshold slightly below the 0.5 default
-              // so quieter callers still trigger detection, with a longer
-              // silence window so a natural mid-sentence pause is not treated
-              // as the end of the turn.
-              type: "server_vad",
-              threshold: 0.45,
-              prefix_padding_ms: 300,
-              silence_duration_ms: 700,
+              // Semantic VAD ends the user's turn on meaning rather than a
+              // fixed silence timer. High eagerness keeps turn-taking snappy;
+              // semantic completion (not raw silence) is what guards against
+              // cutting callers off mid-sentence.
+              type: "semantic_vad",
+              eagerness: "high",
               create_response: true,
               interrupt_response: true,
             },

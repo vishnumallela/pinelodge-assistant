@@ -193,6 +193,12 @@ export const router = {
         return { ok };
       }),
 
+    // Stage 7 — the assistant hands the announced transfer off; her leg ends.
+    handoff: authed.input(callId).handler(async ({ input }) => {
+      await recordToolEvent(db, input.callId, "complete_transfer", { ok: true });
+      return { ok: true };
+    }),
+
     appendTranscript: authed
       .input(
         callId.extend({

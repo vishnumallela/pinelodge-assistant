@@ -155,6 +155,24 @@ export interface RouteInstruction {
   destination: { name: string; role: string; department: string; extension: string } | null;
   outcome: string;
   reason: string;
+  /** The application's follow-through for the assistant — policy, not prompt. */
+  instruction: string;
+}
+
+function routeFollowThrough(
+  action: RouteInstruction["action"],
+  destination: RouteInstruction["destination"],
+): string {
+  switch (action) {
+    case "transfer":
+      return `Tell the caller you are connecting them to ${destination?.name ?? "the right person"} now, then immediately call complete_transfer to hand the line off.`;
+    case "voicemail":
+      return `${destination ? `${destination.name} is` : "They are"} unavailable right now — offer to take a message, save it with leave_voicemail, then say goodbye and call end_call.`;
+    case "answer":
+      return "Answer the caller's question yourself using get_facility_info; no transfer.";
+    case "emergency":
+      return "Emergency workflow: if the caller is off-site, tell them to hang up and dial 911 now. Stay brief and calm, then say goodbye and call end_call.";
+  }
 }
 
 /**
@@ -204,18 +222,21 @@ export async function routeCall(
     })
     .where(eq(call.id, id));
 
+  const destination = decision.destination
+    ? {
+        name: decision.destination.name,
+        role: decision.destination.role,
+        department: decision.destination.department,
+        extension: decision.destination.extension,
+      }
+    : null;
+
   return {
     action,
-    destination: decision.destination
-      ? {
-          name: decision.destination.name,
-          role: decision.destination.role,
-          department: decision.destination.department,
-          extension: decision.destination.extension,
-        }
-      : null,
+    destination,
     outcome,
     reason: detail,
+    instruction: routeFollowThrough(action, destination),
   };
 }
 

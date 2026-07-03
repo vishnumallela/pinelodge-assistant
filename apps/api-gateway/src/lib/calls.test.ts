@@ -114,6 +114,7 @@ describe("routing + transfer outcome", () => {
     const r = await routeCall(db, c.id, "billing", businessHours);
     expect(r.action).toBe("transfer");
     expect(r.destination?.name).toBe("Mira");
+    expect(r.instruction).toContain("complete_transfer");
 
     const row = (await getCallDetail(db, c.id))!.call;
     expect(row.routeTarget).toBe("billing");

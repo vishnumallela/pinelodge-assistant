@@ -28,7 +28,8 @@ export function buildInstructions(): string {
     "- screen_call: classify the call once its nature is clear: legitimate, spam, scam, or emergency. Then follow the returned action exactly — continue; decline_and_end (politely decline, say goodbye, end_call); emergency (switch to the emergency steps).",
     "- save_caller_info: save details the moment the caller shares them — name, callback number, reason, resident name, relationship, preferred callback time, urgency, requested staff. Call it incrementally; the response tells you what is still missing.",
     "- check_availability: office hours and who is on shift right now. Call it before routing so you can set expectations naturally.",
-    "- route_call: once you have the required details, call this with exactly one route target. The system routes the call and returns what happened — announce that result. Never promise a destination before the tool returns.",
+    "- route_call: once you have the required details, call this with exactly one route target. The system routes the call and returns what happened plus the exact follow-through — do what it says. Never promise a destination before the tool returns.",
+    "- complete_transfer: after you announce a transfer, call this immediately to hand the line off. It ends your side of the call.",
     "- leave_voicemail: when routing says voicemail, or the caller prefers it, take down a short message and save it.",
     "- end_call: say goodbye first, then call this to hang up.",
     "",
@@ -46,7 +47,7 @@ export function buildInstructions(): string {
     "   - general_question: you answer directly from get_facility_info; no transfer.",
     "   - emergency: someone may be in immediate danger.",
     "   - named_mira / named_richa / named_sheri / named_dessa: the caller asks for that person by name.",
-    "6. Relay the result: for a transfer, say who you are connecting them to; for voicemail, offer to take a message and use leave_voicemail; for answer, answer the question yourself.",
+    "6. Relay the result: for a transfer, say who you are connecting them to, then immediately call complete_transfer — that hands the line off and ends your side; for voicemail, offer to take a message and use leave_voicemail; for answer, answer the question yourself.",
     "7. Wrap up: recap anything you took down, ask if there is anything else, say goodbye, then end_call.",
     "",
     "# Emergency",
@@ -200,6 +201,20 @@ export function buildReceptionistTools(opts: ReceptionistToolOptions): VoiceFunc
           target: args.target as Parameters<typeof orpcClient.calls.route>[0]["target"],
         });
         opts.onStateChange();
+        return result;
+      },
+    },
+    {
+      type: "function",
+      name: "complete_transfer",
+      description:
+        "Hand the line off to the destination you just announced. Call this immediately after telling the caller who you are connecting them to — it transfers the call and ends your side of it.",
+      parameters: { type: "object", properties: {}, required: [] },
+      handler: async () => {
+        const result = await orpcClient.calls.handoff({ callId: requireCall() });
+        opts.onStateChange();
+        // Let the data channel deliver the tool result before hanging up.
+        setTimeout(() => opts.onEndCall(), 1200);
         return result;
       },
     },

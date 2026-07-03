@@ -20,6 +20,7 @@ describe("agent tool hygiene", () => {
   it("locks the receptionist tool inventory", () => {
     expect(tools.map((t) => t.name).toSorted()).toEqual([
       "check_availability",
+      "complete_transfer",
       "end_call",
       "get_facility_info",
       "leave_voicemail",
