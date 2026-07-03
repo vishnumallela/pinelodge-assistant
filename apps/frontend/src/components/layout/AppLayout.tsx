@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Outlet } from "@tanstack/react-router";
-import { AudioLines, History, LogOut, Menu, Phone, Users } from "lucide-react";
+import { History, LogOut, Menu, Phone, Users } from "lucide-react";
+
+import { PineMark } from "@/components/brand/PineMark";
 
 import { signOut } from "@/lib/auth-client";
 import { clearBearer } from "@/lib/bearer";
@@ -39,12 +41,18 @@ function Shell() {
 
   const sidebarBody = (
     <>
-      <div className="flex h-12 items-center px-2">
-        <Link to="/" onClick={closeMobile} className="flex items-center gap-2 rounded-lg px-2 py-1">
-          <span className="grid h-6 w-6 place-items-center rounded-md bg-foreground text-background">
-            <AudioLines className="h-3.5 w-3.5" />
+      <div className="flex h-14 items-center px-2">
+        <Link
+          to="/"
+          onClick={closeMobile}
+          className="flex items-center gap-2.5 rounded-lg px-2 py-1"
+        >
+          <span className="grid h-7 w-7 place-items-center rounded-lg bg-foreground text-background">
+            <PineMark className="h-4.5 w-4.5" />
           </span>
-          <span className="text-sm font-semibold tracking-tight">{PRODUCT_NAME}</span>
+          <span className="font-display text-[17px] leading-none tracking-normal">
+            {PRODUCT_NAME}
+          </span>
         </Link>
       </div>
       <nav className="flex flex-col gap-0.5 px-2">
@@ -69,7 +77,9 @@ function Shell() {
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background text-foreground">
-      <aside className="hidden w-60 shrink-0 flex-col bg-sidebar md:flex">{sidebarBody}</aside>
+      <aside className="hidden w-60 shrink-0 flex-col border-r border-border/60 bg-sidebar md:flex">
+        {sidebarBody}
+      </aside>
 
       <MobileDrawer open={mobileOpen} onClose={closeMobile}>
         {sidebarBody}
@@ -85,11 +95,13 @@ function Shell() {
           >
             <Menu className="h-4 w-4" />
           </button>
-          <Link to="/" className="flex items-center gap-2 px-1">
-            <span className="grid h-6 w-6 place-items-center rounded-md bg-foreground text-background">
-              <AudioLines className="h-3.5 w-3.5" />
+          <Link to="/" className="flex items-center gap-2.5 px-1">
+            <span className="grid h-7 w-7 place-items-center rounded-lg bg-foreground text-background">
+              <PineMark className="h-4.5 w-4.5" />
             </span>
-            <span className="text-sm font-semibold tracking-tight">{PRODUCT_NAME}</span>
+            <span className="font-display text-[17px] leading-none tracking-normal">
+              {PRODUCT_NAME}
+            </span>
           </Link>
         </header>
         <Outlet />
