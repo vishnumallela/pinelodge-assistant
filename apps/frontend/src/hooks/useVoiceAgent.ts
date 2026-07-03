@@ -22,7 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const CALLS_ENDPOINT = "https://api.openai.com/v1/realtime/calls";
 const DEFAULT_MODEL = "gpt-realtime-2";
-const DEFAULT_VOICE = "marin";
+const DEFAULT_VOICE = "shimmer";
 const DEFAULT_TRANSCRIBE_MODEL = "gpt-4o-transcribe";
 
 /* ── public types ─────────────────────────────────────────────────────── */
@@ -215,17 +215,20 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
         tool_choice: "auto",
         audio: {
           input: {
-            // No language pin: gpt-4o-transcribe auto-detects, which is what
-            // lets callers speak (and switch between) English and Indian
-            // languages mid-call.
-            transcription: { model: cfg.transcribeModel },
+            // Pinning the language (ISO-639-1) measurably improves both
+            // transcription accuracy and latency, and stops noise from being
+            // hallucinated as foreign-language fragments.
+            transcription: { model: cfg.transcribeModel, language: "en" },
             noise_reduction: { type: "near_field" },
             turn_detection: o.turnDetection ?? {
-              // Semantic VAD ends the user's turn on meaning, not a fixed
-              // silence window — noticeably better for natural, code-switching
-              // speech than server_vad's silence timer.
-              type: "semantic_vad",
-              eagerness: "medium",
+              // Balanced server VAD: threshold slightly below the 0.5 default
+              // so quieter callers still trigger detection, with a longer
+              // silence window so a natural mid-sentence pause is not treated
+              // as the end of the turn.
+              type: "server_vad",
+              threshold: 0.45,
+              prefix_padding_ms: 300,
+              silence_duration_ms: 700,
               create_response: true,
               interrupt_response: true,
             },

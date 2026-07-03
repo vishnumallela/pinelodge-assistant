@@ -16,7 +16,7 @@ export function HomePage() {
     .filter((h) => h.status === "completed" && h.text.trim() !== "")
     .map((h) => ({ id: h.id, role: h.role, text: h.text }));
   const inCall = agent.isConnected || agent.status === "connecting";
-  const empty = messages.length === 0 && !agent.liveUserText && !agent.liveAgentText;
+  const empty = messages.length === 0;
 
   const orbState: OrbState = agent.isConnected
     ? agent.isAgentSpeaking
@@ -77,9 +77,7 @@ export function HomePage() {
         <TranscriptPanel
           className="min-h-0 flex-1"
           messages={messages}
-          liveUserText={agent.liveUserText}
-          liveAgentText={agent.liveAgentText}
-          thinking={agent.isAgentThinking && !agent.liveAgentText}
+          thinking={agent.isAgentThinking || agent.isAgentSpeaking}
         />
         <div className="pointer-events-none absolute inset-x-0 bottom-0">
           <div className="h-16 bg-linear-to-t from-background to-transparent" />
