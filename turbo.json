@@ -27,28 +27,86 @@
     "AUTH_PORT",
     "FRONTEND_PORT",
     "VITE_API_URL",
-    "VITE_AUTH_URL"
+    "VITE_AUTH_URL",
+    "CALL_REPORT_WEBHOOK_URL"
   ],
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", "!**/*.md", "!**/.env.example", "!**/dist/**"],
-      "outputs": ["dist/**"]
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!**/*.md",
+        "!**/.env.example",
+        "!**/dist/**"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
     },
-    "dev": { "cache": false, "persistent": true },
-    "start": { "cache": false, "persistent": true },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "start": {
+      "cache": false,
+      "persistent": true
+    },
     "typecheck": {
-      "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", "!**/*.md", "!**/dist/**"],
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!**/*.md",
+        "!**/dist/**"
+      ],
       "outputs": []
     },
-    "lint": { "inputs": ["$TURBO_DEFAULT$", "!**/dist/**", "!**/*.md"], "outputs": [] },
-    "test": { "inputs": ["$TURBO_DEFAULT$", "!**/dist/**", "!**/*.md"], "outputs": [] },
-    "format": { "cache": false, "outputs": [] },
-    "format:check": { "inputs": ["$TURBO_DEFAULT$", "!**/dist/**"], "outputs": [] },
-    "check": { "dependsOn": ["typecheck", "lint", "test", "format:check"] },
-    "db:migrate": { "cache": false },
-    "db:generate": { "cache": false },
-    "clean": { "cache": false }
+    "lint": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!**/dist/**",
+        "!**/*.md"
+      ],
+      "outputs": []
+    },
+    "test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!**/dist/**",
+        "!**/*.md"
+      ],
+      "outputs": []
+    },
+    "format": {
+      "cache": false,
+      "outputs": []
+    },
+    "format:check": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!**/dist/**"
+      ],
+      "outputs": []
+    },
+    "check": {
+      "dependsOn": [
+        "typecheck",
+        "lint",
+        "test",
+        "format:check"
+      ]
+    },
+    "db:migrate": {
+      "cache": false
+    },
+    "db:generate": {
+      "cache": false
+    },
+    "clean": {
+      "cache": false
+    }
   }
 }

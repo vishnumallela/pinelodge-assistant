@@ -171,7 +171,7 @@ function routeFollowThrough(
     case "answer":
       return "Answer the caller's question yourself using get_facility_info; no transfer.";
     case "emergency":
-      return "Emergency workflow: if the caller is off-site, tell them to hang up and dial 911 now. Stay brief and calm, then say goodbye and call end_call.";
+      return "Emergency workflow: if the caller is off-site, tell them to hang up and dial 911 now. Stay brief and calm. After the 911 guidance, offer to connect them to the on-site nursing station — if they accept, call route_call with target onsite_care; otherwise say goodbye and call end_call.";
   }
 }
 

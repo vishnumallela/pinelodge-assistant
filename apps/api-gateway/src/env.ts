@@ -36,6 +36,10 @@ const schema = z.object({
   // Facility identity
   FACILITY_NAME: z.string().default("Pine Lodge Assisted Living"),
   FACILITY_TIMEZONE: z.string().default("America/Chicago"),
+
+  // Optional: finished call reports are POSTed here (e.g. a Zapier/n8n hook
+  // that emails them). Unset = off.
+  CALL_REPORT_WEBHOOK_URL: z.string().url().optional(),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -58,4 +62,5 @@ export const env = {
   OPENAI_SUMMARY_MODEL: raw.OPENAI_SUMMARY_MODEL,
   FACILITY_NAME: raw.FACILITY_NAME,
   FACILITY_TIMEZONE: raw.FACILITY_TIMEZONE,
+  CALL_REPORT_WEBHOOK_URL: raw.CALL_REPORT_WEBHOOK_URL,
 } as const;

@@ -5,14 +5,20 @@ export function formatDuration(seconds: number | null | undefined): string {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
+import { FACILITY_TIMEZONE } from "./config";
+
+/** Timestamps render in facility time (with the zone shown), not viewer time,
+ *  so the console reads consistently with schedules and routing decisions. */
 export function formatDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString("en-US", {
+    timeZone: FACILITY_TIMEZONE,
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZoneName: "short",
   });
 }
 

@@ -3,6 +3,7 @@ import type { db as appDb } from "../db";
 import { call, callReport } from "../db/schema";
 import { env } from "../env";
 import { getCallDetail, type CallDetail } from "./calls";
+import { deliverCallReport } from "./webhook";
 
 type Db = typeof appDb;
 
@@ -146,6 +147,9 @@ export async function runSummarization(db: Db, callId: string, attempts = 3): Pr
         .values({ callId, ...draft, model: env.OPENAI_SUMMARY_MODEL })
         .onConflictDoNothing(); // reports are permanent; never overwrite
       await db.update(call).set({ summaryStatus: "complete" }).where(eq(call.id, callId));
+      // Ship the finished report to the configured webhook (no-op when unset).
+      const fresh = await getCallDetail(db, callId);
+      if (fresh) void deliverCallReport(fresh);
       return true;
     } catch (e) {
       console.error(`[summarize] call ${callId} attempt ${attempt}/${attempts}:`, e);

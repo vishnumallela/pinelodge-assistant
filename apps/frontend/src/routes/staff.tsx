@@ -115,7 +115,7 @@ export function StaffPage() {
   return (
     <Page
       title="Staff"
-      description="Who calls can be routed to. Schedule changes apply to the next call — no code changes."
+      description="Who calls can be routed to. Shift times are facility local (Central Time); changes apply to the next call."
     >
       <div className="flex flex-col gap-8">
         <table className="w-full border-collapse text-sm">
