@@ -29,6 +29,8 @@ export function buildInstructions(): string {
     "- Concise. One or two short sentences per turn, one question at a time.",
     "- Natural and human. Never robotic, never overly enthusiastic, never verbose.",
     "- Vary your acknowledgements; do not repeat the caller's name more than once or twice.",
+    "- Never repeat a sentence you have already said on this call. Say the greeting once and never again.",
+    "- When a tool result arrives, continue from where you left off. Do not re-greet, re-acknowledge, or restate anything you already told the caller.",
     "",
     "# Tools",
     "- get_facility_info: facts about the community (address, hours, visiting, dining, parking). Use it for general questions; never invent facility details.",
@@ -173,9 +175,20 @@ export function buildReceptionistTools(opts: ReceptionistToolOptions): VoiceFunc
         "Office hours, staff schedules, and who is on shift right now. Call before routing so expectations you set match reality.",
       parameters: { type: "object", properties: {}, required: [] },
       handler: async () => {
-        const result = await orpcClient.availability();
+        const a = await orpcClient.availability();
         opts.onStateChange();
-        return result;
+        // Compact, model-facing shape: the full directory (ids, extensions,
+        // per-day schedules) pollutes the conversation context; the model
+        // only needs who is reachable right now.
+        return {
+          officeOpen: a.officeOpen,
+          officeHours: a.officeHours,
+          localTime: a.localTime,
+          onShift: a.staff
+            .filter((s) => s.onShift)
+            .map((s) => ({ name: s.name, department: s.department })),
+          offShift: a.staff.filter((s) => !s.onShift).map((s) => s.name),
+        };
       },
     },
     {
@@ -207,12 +220,20 @@ export function buildReceptionistTools(opts: ReceptionistToolOptions): VoiceFunc
         required: ["target"],
       },
       handler: async (args) => {
-        const result = await orpcClient.calls.route({
+        const r = await orpcClient.calls.route({
           callId: requireCall(),
           target: args.target as Parameters<typeof orpcClient.calls.route>[0]["target"],
         });
         opts.onStateChange();
-        return result;
+        // Model-facing shape: the action, who (if anyone), and the exact
+        // follow-through. Internal reasons/outcome codes stay server-side.
+        return {
+          action: r.action,
+          destination: r.destination
+            ? { name: r.destination.name, department: r.destination.department }
+            : null,
+          instruction: r.instruction,
+        };
       },
     },
     {

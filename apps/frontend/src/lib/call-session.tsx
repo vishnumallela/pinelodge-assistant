@@ -27,7 +27,13 @@ export type LiveCall = NonNullable<Awaited<ReturnType<typeof orpcClient.calls.ge
 
 /** One entry in the live conversation feed: a completed turn, or tool activity. */
 export type FeedItem =
-  | { kind: "message"; id: string; role: "user" | "assistant"; text: string }
+  | {
+      kind: "message";
+      id: string;
+      role: "user" | "assistant";
+      text: string;
+      responseId?: string;
+    }
   | { kind: "tool"; id: string; name: string; status: "running" | "done" };
 
 interface CallSession {
@@ -111,22 +117,42 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   });
 
   // Fold newly completed turns into the feed, preserving arrival order
-  // relative to tool activity.
+  // relative to tool activity. The model sometimes splits one utterance
+  // across several output items in the same response — merge those into a
+  // single bubble, and drop a fragment that merely repeats the previous one.
   useEffect(() => {
     const fresh = agent.history.filter(
       (h) => h.status === "completed" && h.text.trim() !== "" && !feedSeenRef.current.has(h.id),
     );
     if (fresh.length === 0) return;
     for (const h of fresh) feedSeenRef.current.add(h.id);
-    setFeed((f) => [
-      ...f,
-      ...fresh.map((h) => ({
-        kind: "message" as const,
-        id: h.id,
-        role: h.role,
-        text: h.text,
-      })),
-    ]);
+    setFeed((f) => {
+      const next = f.slice();
+      for (const h of fresh) {
+        const text = h.text.trim();
+        const last = next[next.length - 1];
+        if (
+          h.role === "assistant" &&
+          last?.kind === "message" &&
+          last.role === "assistant" &&
+          last.responseId !== undefined &&
+          last.responseId === h.responseId
+        ) {
+          if (!last.text.endsWith(text)) {
+            next[next.length - 1] = { ...last, text: `${last.text} ${text}` };
+          }
+          continue;
+        }
+        next.push({
+          kind: "message",
+          id: h.id,
+          role: h.role,
+          text,
+          responseId: h.responseId,
+        });
+      }
+      return next;
+    });
   }, [agent.history]);
 
   // Persist completed turns as they land; the (callId, entryId) key makes

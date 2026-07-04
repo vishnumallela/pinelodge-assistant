@@ -80,6 +80,8 @@ export interface VoiceHistoryItem {
   role: "user" | "assistant";
   text: string;
   status: "in_progress" | "completed";
+  /** The response this turn belongs to; items sharing it are one utterance. */
+  responseId?: string;
 }
 
 export interface UseVoiceAgentReturn {
@@ -103,6 +105,32 @@ export interface UseVoiceAgentReturn {
   toggleMute: () => void;
   sendText: (text: string) => void;
   interrupt: () => void;
+}
+
+/* ── debug tap ────────────────────────────────────────────────────────── */
+
+/** Dev-only event tap: set localStorage "pinelodge.debugRealtime" and every
+ *  data-channel event (both directions) lands on window.__rtEvents for
+ *  inspection when diagnosing turn-taking or duplication issues. */
+function debugTap(dir: "in" | "out", ev: Record<string, unknown>): void {
+  if (!import.meta.env.DEV) return;
+  try {
+    if (!localStorage.getItem("pinelodge.debugRealtime")) return;
+    const w = window as unknown as { __rtEvents?: Record<string, unknown>[] };
+    w.__rtEvents = w.__rtEvents ?? [];
+    const resp = ev.response as { id?: string } | undefined;
+    const item = ev.item as { id?: string } | undefined;
+    w.__rtEvents.push({
+      t: Date.now(),
+      dir,
+      type: ev.type,
+      rid: (ev.response_id as string | undefined) ?? resp?.id,
+      iid: (ev.item_id as string | undefined) ?? item?.id,
+      text: typeof ev.transcript === "string" ? (ev.transcript as string).slice(0, 60) : undefined,
+    });
+  } catch {
+    /* never interfere with the call */
+  }
 }
 
 /* ── audio level metering ─────────────────────────────────────────────── */
@@ -182,6 +210,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
   const sendEvent = useCallback((event: Record<string, unknown>) => {
     const dc = dcRef.current;
     if (dc && dc.readyState === "open") dc.send(JSON.stringify(event));
+    debugTap("out", event);
   }, []);
 
   const upsert = useCallback(
@@ -310,14 +339,20 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
 
   const handleServerEvent = useCallback(
     (ev: { type: string; [k: string]: unknown }) => {
+      debugTap("in", ev);
       switch (ev.type) {
         case "session.updated":
           if (status !== "connected") setStatus("connected");
           if (optsRef.current.greeting && !greetedRef.current) {
             greetedRef.current = true;
+            // Verbatim, single-utterance greeting: freeform "greet the caller"
+            // instructions let the model improvise and often produce a second
+            // output item repeating part of the greeting aloud.
             sendEvent({
               type: "response.create",
-              response: { instructions: `Greet the caller now: ${optsRef.current.greeting}` },
+              response: {
+                instructions: `Say exactly this, as one utterance, and nothing else: "${optsRef.current.greeting}"`,
+              },
             });
           }
           break;
@@ -385,6 +420,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
               role: "assistant",
               text,
               status: "completed",
+              responseId: ev.response_id as string | undefined,
             });
           }
           setLiveAgentText("");
