@@ -161,6 +161,9 @@ class TwilioBridge {
   private streamSid = "";
   private rowId = "";
   private readonly transcript: TranscriptTurn[] = [];
+  /** item_id -> transcript index: Grok re-sends cumulative transcripts per
+   *  item, so turns are replaced in place, never appended twice. */
+  private readonly turnIndex = new Map<string, number>();
   private hangupRequested = false;
   private finalized = false;
   private readonly cap: ReturnType<typeof setTimeout>;
@@ -274,8 +277,8 @@ class TwilioBridge {
           content: [{ type: "output_text", text: greeting }],
         },
       });
-      this.transcript.push({ role: "assistant", text: greeting });
-      this.persist();
+      // force_message injects a full response lifecycle, so its transcript
+      // arrives through the normal event below - no manual push, no double.
       if (this.rowId) void logCallEvent(this.rowId, "xai session opened, greeting sent");
     });
 
@@ -307,21 +310,18 @@ class TwilioBridge {
             this.twilio.send(JSON.stringify({ event: "clear", streamSid: this.streamSid }));
           }
           break;
+        case "conversation.item.input_audio_transcription.updated":
         case "conversation.item.input_audio_transcription.completed": {
           const text = String(ev.transcript ?? "").trim();
-          if (text) {
-            this.transcript.push({ role: "caller", text });
-            this.persist();
-          }
+          const itemId = String(ev.item_id ?? "");
+          if (text && itemId) this.upsertTurn(itemId, "caller", text);
           break;
         }
         case "response.output_audio_transcript.done":
         case "response.audio_transcript.done": {
           const text = String(ev.transcript ?? "").trim();
-          if (text) {
-            this.transcript.push({ role: "assistant", text });
-            this.persist();
-          }
+          const itemId = String(ev.item_id ?? `resp:${String(ev.response_id ?? "")}`);
+          if (text) this.upsertTurn(itemId, "assistant", text);
           break;
         }
         case "response.function_call_arguments.done":
@@ -409,6 +409,18 @@ class TwilioBridge {
       // Let the agent recover: apologize, offer a callback, then end_call.
       send({ type: "response.create" });
     }
+  }
+
+  private upsertTurn(itemId: string, role: "caller" | "assistant", text: string): void {
+    const key = `${role}:${itemId}`;
+    const at = this.turnIndex.get(key);
+    if (at !== undefined) {
+      this.transcript[at] = { role, text };
+    } else {
+      this.turnIndex.set(key, this.transcript.length);
+      this.transcript.push({ role, text });
+    }
+    this.persist();
   }
 
   private persist(): void {

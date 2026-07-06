@@ -270,6 +270,9 @@ async function runSipAgent(callId: string, from: string): Promise<void> {
 
   const { prompt, greeting } = await getAgentPrompt();
   const transcript: TranscriptTurn[] = [];
+  // item_id -> index: Grok re-sends cumulative transcripts per item, so turns
+  // are replaced in place, never appended twice.
+  const turnIndex = new Map<string, number>();
   let hangupRequested = false;
 
   const finalize = async () => {
@@ -302,6 +305,17 @@ async function runSipAgent(callId: string, from: string): Promise<void> {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(e));
     };
     const persist = () => void saveTranscript(rowId, transcript).catch(() => {});
+    const upsertTurn = (itemId: string, role: "caller" | "assistant", text: string) => {
+      const key = `${role}:${itemId}`;
+      const at = turnIndex.get(key);
+      if (at !== undefined) {
+        transcript[at] = { role, text };
+      } else {
+        turnIndex.set(key, transcript.length);
+        transcript.push({ role, text });
+      }
+      persist();
+    };
 
     // Safety net: a stuck call ends after 10 minutes.
     const cap = setTimeout(() => void hangup(), 10 * 60 * 1000);
@@ -357,8 +371,8 @@ async function runSipAgent(callId: string, from: string): Promise<void> {
           content: [{ type: "output_text", text: greeting }],
         },
       });
-      transcript.push({ role: "assistant", text: greeting });
-      persist();
+      // force_message injects a full response lifecycle, so its transcript
+      // arrives through the normal event below - no manual push, no double.
     });
 
     ws.addEventListener("message", (msg) => {
@@ -369,21 +383,18 @@ async function runSipAgent(callId: string, from: string): Promise<void> {
         return;
       }
       switch (ev.type) {
+        case "conversation.item.input_audio_transcription.updated":
         case "conversation.item.input_audio_transcription.completed": {
           const text = String(ev.transcript ?? "").trim();
-          if (text) {
-            transcript.push({ role: "caller", text });
-            persist();
-          }
+          const itemId = String(ev.item_id ?? "");
+          if (text && itemId) upsertTurn(itemId, "caller", text);
           break;
         }
         case "response.output_audio_transcript.done":
         case "response.audio_transcript.done": {
           const text = String(ev.transcript ?? "").trim();
-          if (text) {
-            transcript.push({ role: "assistant", text });
-            persist();
-          }
+          const itemId = String(ev.item_id ?? `resp:${String(ev.response_id ?? "")}`);
+          if (text) upsertTurn(itemId, "assistant", text);
           break;
         }
         case "response.function_call_arguments.done":
