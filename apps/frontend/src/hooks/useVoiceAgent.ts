@@ -79,7 +79,7 @@ export interface UseVoiceAgentReturn {
   isToolRunning: boolean;
   isMuted: boolean;
   history: VoiceHistoryItem[];
-  connect: () => Promise<void>;
+  connect: (overrides?: { instructions?: string; greeting?: string }) => Promise<void>;
   disconnect: () => void;
   toggleMute: () => void;
   sendText: (text: string) => void;
@@ -263,6 +263,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
   const pendingToolResponseRef = useRef(false);
   const voiceRef = useRef(DEFAULT_VOICE);
   const instructionsRef = useRef<string | undefined>(undefined);
+  const greetingRef = useRef<string | undefined>(undefined);
   const greetingSentRef = useRef(false);
   const conversationIdRef = useRef<string | null>(null);
   const reconnectsLeftRef = useRef(1);
@@ -415,14 +416,15 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
     });
     // Scripted greeting: the server TTS-speaks a force_message verbatim with
     // zero model latency; exactly once per call, never on reconnect.
-    if (o.greeting && !greetingSentRef.current) {
+    const greeting = greetingRef.current;
+    if (greeting && !greetingSentRef.current) {
       greetingSentRef.current = true;
       sendEvent({
         type: "conversation.item.create",
         item: {
           type: "force_message",
           role: "assistant",
-          content: [{ type: "output_text", text: o.greeting }],
+          content: [{ type: "output_text", text: greeting }],
         },
       });
     }
@@ -852,63 +854,69 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
     [fail, handleServerEvent, teardown],
   );
 
-  const connect = useCallback(async () => {
-    if (wsRef.current || connectingRef.current) return;
-    connectingRef.current = true;
-    const myGen = ++genRef.current;
-    setHistory([]);
-    setStatus("connecting");
-    conversationIdRef.current = null;
-    wasConnectedRef.current = false;
-    greetingSentRef.current = false;
-    reconnectsLeftRef.current = 1;
-    userSpeakingRef.current = false;
-    agentSpeakingRef.current = false;
-    agentThinkingRef.current = false;
-    responseActiveRef.current = false;
-    pendingToolResponseRef.current = false;
-    pendingTruncateRef.current = null;
-    droppedItemRef.current = null;
-    preBufferRef.current = [];
-    enqueuedFramesRef.current = 0;
-    playedFramesRef.current = 0;
-    currentItemRef.current = null;
-    instructionsRef.current = optsRef.current.instructions;
+  const connect = useCallback(
+    async (overrides?: { instructions?: string; greeting?: string }) => {
+      if (wsRef.current || connectingRef.current) return;
+      connectingRef.current = true;
+      const myGen = ++genRef.current;
+      setHistory([]);
+      setStatus("connecting");
+      conversationIdRef.current = null;
+      wasConnectedRef.current = false;
+      greetingSentRef.current = false;
+      reconnectsLeftRef.current = 1;
+      userSpeakingRef.current = false;
+      agentSpeakingRef.current = false;
+      agentThinkingRef.current = false;
+      responseActiveRef.current = false;
+      pendingToolResponseRef.current = false;
+      pendingTruncateRef.current = null;
+      droppedItemRef.current = null;
+      preBufferRef.current = [];
+      enqueuedFramesRef.current = 0;
+      playedFramesRef.current = 0;
+      currentItemRef.current = null;
+      // Fresh values win over render-time options: the caller fetches the live
+      // prompt (availability-dependent) right before connecting.
+      instructionsRef.current = overrides?.instructions ?? optsRef.current.instructions;
+      greetingRef.current = overrides?.greeting ?? optsRef.current.greeting;
 
-    try {
-      // Token and audio pipeline in parallel — the mic buffers locally until
-      // the session is configured, so nothing the caller says is lost.
-      const [tokenResult, audioResult] = await Promise.allSettled([
-        optsRef.current.getToken(),
-        setupAudio(),
-      ]);
-      if (myGen !== genRef.current) {
-        teardown();
-        return;
+      try {
+        // Token and audio pipeline in parallel — the mic buffers locally until
+        // the session is configured, so nothing the caller says is lost.
+        const [tokenResult, audioResult] = await Promise.allSettled([
+          optsRef.current.getToken(),
+          setupAudio(),
+        ]);
+        if (myGen !== genRef.current) {
+          teardown();
+          return;
+        }
+        if (audioResult.status === "rejected") {
+          const e = audioResult.reason as Error;
+          fail(
+            e?.name === "NotAllowedError"
+              ? "Microphone permission denied"
+              : `Microphone error: ${e?.message ?? String(e)}`,
+          );
+          return;
+        }
+        if (tokenResult.status === "rejected" || !tokenResult.value?.token) {
+          fail(
+            tokenResult.status === "rejected"
+              ? ((tokenResult.reason as Error)?.message ?? "Could not get a voice token")
+              : "Could not get a voice token",
+          );
+          return;
+        }
+        voiceRef.current = tokenResult.value.voice ?? DEFAULT_VOICE;
+        openSocket(myGen, tokenResult.value);
+      } finally {
+        connectingRef.current = false;
       }
-      if (audioResult.status === "rejected") {
-        const e = audioResult.reason as Error;
-        fail(
-          e?.name === "NotAllowedError"
-            ? "Microphone permission denied"
-            : `Microphone error: ${e?.message ?? String(e)}`,
-        );
-        return;
-      }
-      if (tokenResult.status === "rejected" || !tokenResult.value?.token) {
-        fail(
-          tokenResult.status === "rejected"
-            ? ((tokenResult.reason as Error)?.message ?? "Could not get a voice token")
-            : "Could not get a voice token",
-        );
-        return;
-      }
-      voiceRef.current = tokenResult.value.voice ?? DEFAULT_VOICE;
-      openSocket(myGen, tokenResult.value);
-    } finally {
-      connectingRef.current = false;
-    }
-  }, [fail, openSocket, setupAudio, teardown]);
+    },
+    [fail, openSocket, setupAudio, teardown],
+  );
 
   const toggleMute = useCallback(() => {
     mutedRef.current = !mutedRef.current;

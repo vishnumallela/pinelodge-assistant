@@ -34,6 +34,15 @@ const schema = z.object({
   GROK_REALTIME_VOICE: z.string().default("ara"),
   // Text model that writes the post-call summary (never the realtime model).
   XAI_SUMMARY_MODEL: z.string().default("grok-4.3"),
+
+  // Facility identity: schedules and availability evaluate in this timezone.
+  FACILITY_NAME: z.string().default("Pine Lodge Assisted Living"),
+  FACILITY_TIMEZONE: z.string().default("America/Chicago"),
+
+  // SIP (optional): set the webhook signing secret from the Direct SIP number
+  // registration to enable POST /api/sip/incoming. The realtime WS for SIP
+  // calls authenticates with XAI_API_KEY (ephemeral secrets are not allowed).
+  XAI_SIP_WEBHOOK_SECRET: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -54,4 +63,7 @@ export const env = {
   GROK_REALTIME_MODEL: raw.GROK_REALTIME_MODEL,
   GROK_REALTIME_VOICE: raw.GROK_REALTIME_VOICE,
   XAI_SUMMARY_MODEL: raw.XAI_SUMMARY_MODEL,
+  FACILITY_NAME: raw.FACILITY_NAME,
+  FACILITY_TIMEZONE: raw.FACILITY_TIMEZONE,
+  XAI_SIP_WEBHOOK_SECRET: raw.XAI_SIP_WEBHOOK_SECRET,
 } as const;

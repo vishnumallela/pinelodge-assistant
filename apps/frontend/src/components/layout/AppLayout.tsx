@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Outlet } from "@tanstack/react-router";
-import { LogOut, Menu, ScrollText, Users } from "lucide-react";
+import { LogOut, Menu, PhoneForwarded, ScrollText, SlidersHorizontal, Users } from "lucide-react";
 
 import { PineMark } from "@/components/brand/PineMark";
+import { PromptEditor } from "@/components/prompt/PromptEditor";
 
 import { signOut } from "@/lib/auth-client";
 import { clearBearer } from "@/lib/bearer";
@@ -13,6 +14,7 @@ import { CallSessionProvider, useCallSession } from "@/lib/call-session";
 const NAV = [
   { label: "Call log", to: "/", icon: ScrollText },
   { label: "Staff", to: "/staff", icon: Users },
+  { label: "Phone line", to: "/phone", icon: PhoneForwarded },
 ] as const;
 
 const iconBtn =
@@ -35,6 +37,7 @@ export function AppLayout() {
 
 function Shell() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [promptOpen, setPromptOpen] = useState(false);
   const closeMobile = () => setMobileOpen(false);
 
   const sidebarBody = (
@@ -69,6 +72,16 @@ function Shell() {
             <item.icon className="h-4.5 w-4.5" /> {item.label}
           </Link>
         ))}
+        <button
+          type="button"
+          onClick={() => {
+            closeMobile();
+            setPromptOpen(true);
+          }}
+          className="flex h-10 items-center gap-3 rounded-full px-3.5 text-left text-sm text-muted-foreground transition-colors pf-hover:bg-accent/60 pf-hover:text-foreground"
+        >
+          <SlidersHorizontal className="h-4.5 w-4.5" /> Prompt
+        </button>
       </nav>
       <div className="flex-1" />
       <div className="mx-3 border-t border-border/60" />
@@ -107,6 +120,8 @@ function Shell() {
         </header>
         <Outlet />
       </div>
+
+      <PromptEditor open={promptOpen} onOpenChange={setPromptOpen} />
     </div>
   );
 }

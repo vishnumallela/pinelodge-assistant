@@ -5,7 +5,7 @@ import { toast } from "sonner";
 
 import { useSession } from "@/lib/auth-client";
 import { fetchVoiceToken } from "@/lib/voice-token";
-import { useStaff } from "@/lib/staff";
+import { getAgentPrompt } from "@/lib/staff-api";
 import {
   createCall,
   endCall as endCallApi,
@@ -13,13 +13,7 @@ import {
   type TranscriptTurn,
 } from "@/lib/calls-api";
 import { useVoiceAgent, type UseVoiceAgentReturn } from "@/hooks/useVoiceAgent";
-import {
-  AGENT_NAME,
-  buildInstructions,
-  buildReceptionistTools,
-  CALLER_PROMPTS,
-  GREETING,
-} from "@/lib/receptionist-agent";
+import { AGENT_NAME, buildReceptionistTools, CALLER_PROMPTS } from "@/lib/receptionist-agent";
 
 /**
  * One live call at a time. Starting a call creates a server record, the
@@ -74,14 +68,10 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     () => buildReceptionistTools({ onEndCall: () => setHangupRequested(true) }),
     [],
   );
-  const staff = useStaff();
-  const instructions = useMemo(() => buildInstructions(staff), [staff]);
 
   const agent = useVoiceAgent({
     getToken: fetchVoiceToken,
-    instructions,
     tools,
-    greeting: GREETING,
     onError: (m) => toast.error(m),
   });
 
@@ -164,13 +154,14 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const startCall = useCallback(async () => {
     if (activeCallIdRef.current) return;
     try {
-      const call = await createCall();
+      // The prompt renders fresh at connect time so availability is current.
+      const [call, agentPrompt] = await Promise.all([createCall(), getAgentPrompt()]);
       finalizingRef.current = false;
       setActiveCallId(call.id);
       setHangupRequested(false);
       void qc.invalidateQueries({ queryKey: ["calls"] });
       await navigate({ to: "/calls/$callId", params: { callId: call.id } });
-      await agent.connect();
+      await agent.connect({ instructions: agentPrompt.prompt, greeting: agentPrompt.greeting });
     } catch (e) {
       setActiveCallId(null);
       toast.error(e instanceof Error ? e.message : "Could not start the call.");

@@ -1,10 +1,27 @@
 import { createCall, endCall, getCall, listCalls, saveTranscript } from "./src/calls";
 import { ensureSchema } from "./src/db";
 import { env } from "./src/env";
+import { getAgentPrompt, saveTemplate, DEFAULT_GREETING, DEFAULT_TEMPLATE } from "./src/prompt";
 import { enqueueSummary, startSummaryWorker } from "./src/queue";
 import type { TranscriptTurn } from "./src/schema";
+import {
+  getSipSecret,
+  handleSipWebhook,
+  listRegisteredNumbers,
+  registerNumber,
+  sipEnabled,
+} from "./src/sip";
+import {
+  createStaff,
+  deleteStaff,
+  listStaff,
+  readStaffInput,
+  seedDefaultStaff,
+  updateStaff,
+} from "./src/staff";
 
 await ensureSchema();
+await seedDefaultStaff();
 startSummaryWorker();
 
 function json(data: unknown, status = 200): Response {
@@ -20,7 +37,7 @@ function corsHeaders(origin: string | null): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": allow,
     "Access-Control-Allow-Credentials": "true",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
@@ -143,6 +160,111 @@ async function handleCalls(req: Request, userId: string, path: string): Promise<
   return json({ error: "Not found" }, 404);
 }
 
+async function handleStaff(req: Request, path: string): Promise<Response> {
+  const segments = path.slice("/api/staff".length).split("/").filter(Boolean);
+
+  if (segments.length === 0) {
+    if (req.method === "GET") return json({ staff: await listStaff() });
+    if (req.method === "POST") {
+      const input = readStaffInput(await req.json().catch(() => null));
+      if (!input) return json({ error: "Name and section are required." }, 400);
+      return json({ staff: await createStaff(input) }, 201);
+    }
+    return json({ error: "Method not allowed" }, 405);
+  }
+
+  const id = segments[0]!;
+  if (req.method === "PUT") {
+    const input = readStaffInput(await req.json().catch(() => null));
+    if (!input) return json({ error: "Name and section are required." }, 400);
+    const row = await updateStaff(id, input);
+    return row ? json({ staff: row }) : json({ error: "Staff member not found" }, 404);
+  }
+  if (req.method === "DELETE") {
+    const ok = await deleteStaff(id);
+    return ok ? json({ ok: true }) : json({ error: "Staff member not found" }, 404);
+  }
+  return json({ error: "Method not allowed" }, 405);
+}
+
+/** Public URL of this deployment, from proxy headers (Railway) or the request. */
+function publicUrl(req: Request): string {
+  const url = new URL(req.url);
+  const proto = req.headers.get("x-forwarded-proto") ?? url.protocol.replace(":", "");
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? url.host;
+  return `${proto}://${host}`;
+}
+
+async function handleSipConfig(req: Request): Promise<Response> {
+  if (req.method === "GET") {
+    const secret = await getSipSecret();
+    return json({
+      enabled: Boolean(secret && env.XAI_API_KEY),
+      hasApiKey: Boolean(env.XAI_API_KEY),
+      hasSecret: Boolean(secret),
+      secretSource: env.XAI_SIP_WEBHOOK_SECRET ? "env" : secret ? "registered" : null,
+      webhookUrl: `${publicUrl(req)}/api/sip/incoming`,
+      sipHost: "sip.voice.x.ai",
+      numbers: (await listRegisteredNumbers()) ?? [],
+    });
+  }
+  return json({ error: "Method not allowed" }, 405);
+}
+
+async function handleSipRegister(req: Request): Promise<Response> {
+  const body = (await req.json().catch(() => null)) as {
+    phoneNumber?: unknown;
+    name?: unknown;
+    authUsername?: unknown;
+    authPassword?: unknown;
+    allowedAddresses?: unknown;
+  } | null;
+  const phoneNumber = typeof body?.phoneNumber === "string" ? body.phoneNumber.trim() : "";
+  if (!/^\+[1-9]\d{6,14}$/.test(phoneNumber)) {
+    return json({ error: "Phone number must be E.164, e.g. +14155550100." }, 400);
+  }
+  const result = await registerNumber(
+    {
+      phoneNumber,
+      name: typeof body?.name === "string" && body.name.trim() ? body.name.trim() : "Front desk",
+      authUsername: typeof body?.authUsername === "string" ? body.authUsername.trim() : undefined,
+      authPassword: typeof body?.authPassword === "string" ? body.authPassword : undefined,
+      allowedAddresses: Array.isArray(body?.allowedAddresses)
+        ? body.allowedAddresses.filter((a): a is string => typeof a === "string" && a.trim() !== "")
+        : undefined,
+    },
+    `${publicUrl(req)}/api/sip/incoming`,
+  );
+  if ("error" in result) return json({ error: result.error }, result.status);
+  return json(result, 201);
+}
+
+async function handleAgentPrompt(req: Request): Promise<Response> {
+  if (req.method === "GET") {
+    const data = await getAgentPrompt();
+    return json({
+      ...data,
+      defaults: { template: DEFAULT_TEMPLATE, greeting: DEFAULT_GREETING },
+    });
+  }
+  if (req.method === "PUT") {
+    const body = (await req.json().catch(() => null)) as {
+      template?: unknown;
+      greeting?: unknown;
+    } | null;
+    const template = typeof body?.template === "string" ? body.template.trim() : "";
+    const greeting = typeof body?.greeting === "string" ? body.greeting.trim() : "";
+    if (!template || !greeting) return json({ error: "Template and greeting are required." }, 400);
+    await saveTemplate(template, greeting);
+    const data = await getAgentPrompt();
+    return json({
+      ...data,
+      defaults: { template: DEFAULT_TEMPLATE, greeting: DEFAULT_GREETING },
+    });
+  }
+  return json({ error: "Method not allowed" }, 405);
+}
+
 const server = Bun.serve({
   hostname: "::",
   port: env.PORT,
@@ -156,7 +278,10 @@ const server = Bun.serve({
     let res: Response;
 
     if (path === "/health") {
-      res = json({ ok: true, service: "api-gateway" });
+      res = json({ ok: true, service: "api-gateway", sip: await sipEnabled() });
+    } else if (path === "/api/sip/incoming" && req.method === "POST") {
+      // Authenticated by webhook signature, not by a browser session.
+      res = await handleSipWebhook(req);
     } else {
       const user = await sessionUser(req);
       if (!user) {
@@ -165,6 +290,14 @@ const server = Bun.serve({
         res = await mintVoiceToken(user.id);
       } else if (path === "/api/calls" || path.startsWith("/api/calls/")) {
         res = await handleCalls(req, user.id, path);
+      } else if (path === "/api/staff" || path.startsWith("/api/staff/")) {
+        res = await handleStaff(req, path);
+      } else if (path === "/api/agent/prompt") {
+        res = await handleAgentPrompt(req);
+      } else if (path === "/api/sip/config") {
+        res = await handleSipConfig(req);
+      } else if (path === "/api/sip/register" && req.method === "POST") {
+        res = await handleSipRegister(req);
       } else {
         res = json({ error: "Not found" }, 404);
       }

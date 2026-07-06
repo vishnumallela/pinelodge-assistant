@@ -1,16 +1,29 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
+import {
+  createColumnHelper,
+  flexRender,
+  getCoreRowModel,
+  useReactTable,
+} from "@tanstack/react-table";
+import { motion } from "framer-motion";
 import { ChevronRight, Phone } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { StatusStamp } from "@/components/calls/StatusStamp";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { useCallSession } from "@/lib/call-session";
 import { listCalls, type Call } from "@/lib/calls-api";
 import { formatDuration, formatWhen } from "@/lib/format";
 import { FACILITY_NAME } from "@/lib/config";
-import { cn } from "@/lib/utils";
 
-/** One line describing a call, keyed off its status. */
 function callLine(call: Call): string {
   if (call.summary?.headline) return call.summary.headline;
   switch (call.status) {
@@ -25,12 +38,58 @@ function callLine(call: Call): string {
   }
 }
 
+const helper = createColumnHelper<Call>();
+
+// Module scope: stable cell components, no per-render redefinition.
+const columns = [
+  helper.accessor("startedAt", {
+    header: "When",
+    cell: (info) => (
+      <span className="whitespace-nowrap text-[12.5px] tabular-nums text-muted-foreground">
+        {formatWhen(info.getValue())}
+      </span>
+    ),
+  }),
+  helper.display({
+    id: "summary",
+    header: "Summary",
+    cell: ({ row }) => (
+      <span
+        className={
+          row.original.status === "done"
+            ? "block max-w-[420px] truncate text-[14px] font-medium text-foreground"
+            : "block max-w-[420px] truncate text-[14px] text-muted-foreground"
+        }
+      >
+        {callLine(row.original)}
+      </span>
+    ),
+  }),
+  helper.accessor("durationSeconds", {
+    header: "Length",
+    cell: (info) => (
+      <span className="text-[12.5px] tabular-nums text-muted-foreground">
+        {formatDuration(info.getValue())}
+      </span>
+    ),
+  }),
+  helper.accessor("status", {
+    header: "Status",
+    cell: (info) => <StatusStamp status={info.getValue()} />,
+  }),
+  helper.display({
+    id: "open",
+    header: "",
+    cell: () => <ChevronRight className="size-4 text-muted-foreground/50" />,
+  }),
+];
+
 export function LedgerPage() {
   const { startCall } = useCallSession();
+  const navigate = useNavigate();
   const { data: calls, isLoading } = useQuery({
     queryKey: ["calls"],
     queryFn: listCalls,
-    // Keep the log fresh while any call is live or being written up.
     refetchInterval: (q) =>
       (q.state.data ?? []).some((c) => c.status === "active" || c.status === "summarizing")
         ? 3500
@@ -38,9 +97,15 @@ export function LedgerPage() {
     refetchOnWindowFocus: true,
   });
 
+  const table = useReactTable({
+    data: calls ?? [],
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+  });
+
   return (
     <main className="min-h-0 flex-1 overflow-y-auto scrollbar-subtle">
-      <div className="mx-auto w-full max-w-3xl px-5 py-10 md:px-6">
+      <div className="mx-auto w-full max-w-4xl px-5 py-10 md:px-6">
         <header className="flex items-end justify-between gap-4">
           <div className="space-y-1">
             <h1 className="font-display text-[34px] leading-none tracking-normal text-foreground">
@@ -58,63 +123,75 @@ export function LedgerPage() {
           </Button>
         </header>
 
-        <div className="mt-8">
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
+          className="mt-8 rounded-2xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(33,28,24,0.04)]"
+        >
           {isLoading ? (
-            <LedgerSkeleton />
+            <div className="h-64 animate-pulse" />
           ) : !calls || calls.length === 0 ? (
             <EmptyState onStart={() => void startCall()} />
           ) : (
-            <ul className="space-y-1.5">
-              {calls.map((call) => (
-                <li key={call.id}>
-                  <CallRow call={call} />
-                </li>
-              ))}
-            </ul>
+            <Table>
+              <TableHeader>
+                {table.getHeaderGroups().map((hg) => (
+                  <TableRow key={hg.id}>
+                    {hg.headers.map((h) => (
+                      <TableHead key={h.id} className="first:pl-5 last:pr-5">
+                        {h.isPlaceholder
+                          ? null
+                          : flexRender(h.column.columnDef.header, h.getContext())}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableHeader>
+              <TableBody>
+                {table.getRowModel().rows.map((row, i) => (
+                  <motion.tr
+                    key={row.id}
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{
+                      duration: 0.25,
+                      delay: Math.min(i, 8) * 0.04,
+                      ease: [0.23, 1, 0.32, 1],
+                    }}
+                    tabIndex={0}
+                    aria-label={`Open call from ${formatWhen(row.original.startedAt)}`}
+                    onClick={() =>
+                      void navigate({ to: "/calls/$callId", params: { callId: row.original.id } })
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter")
+                        void navigate({
+                          to: "/calls/$callId",
+                          params: { callId: row.original.id },
+                        });
+                    }}
+                    className="cursor-pointer border-b border-border/50 transition-colors last:border-0 pf-hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none"
+                  >
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell key={cell.id} className="first:pl-5 last:pr-5">
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </TableCell>
+                    ))}
+                  </motion.tr>
+                ))}
+              </TableBody>
+            </Table>
           )}
-        </div>
+        </motion.div>
       </div>
     </main>
   );
 }
 
-function CallRow({ call }: { call: Call }) {
-  const done = call.status === "done";
-  return (
-    <Link
-      to="/calls/$callId"
-      params={{ callId: call.id }}
-      className={cn(
-        "group grid grid-cols-[128px_1fr_auto] items-center gap-4 rounded-xl border border-border/70 bg-card px-5 py-3.5",
-        "transition-[background-color,border-color,transform] duration-150 [transition-timing-function:var(--ease-out)]",
-        "pf-hover:border-border pf-hover:bg-accent/40 active:scale-[0.997]",
-      )}
-    >
-      <span className="text-[12.5px] tabular-nums text-muted-foreground">
-        {formatWhen(call.startedAt)}
-      </span>
-      <span
-        className={cn(
-          "truncate text-[14px]",
-          done ? "font-medium text-foreground" : "text-muted-foreground",
-        )}
-      >
-        {callLine(call)}
-      </span>
-      <span className="flex items-center gap-4">
-        <span className="hidden w-14 text-right text-[12.5px] tabular-nums text-muted-foreground sm:inline">
-          {formatDuration(call.durationSeconds)}
-        </span>
-        <StatusStamp status={call.status} className="w-[104px] justify-end" />
-        <ChevronRight className="size-4 text-muted-foreground/50 transition-transform duration-150 group-hover:translate-x-0.5" />
-      </span>
-    </Link>
-  );
-}
-
 function EmptyState({ onStart }: { onStart: () => void }) {
   return (
-    <div className="rounded-2xl border border-dashed border-border bg-card/40 px-6 py-16 text-center">
+    <div className="px-6 py-16 text-center">
       <p className="font-display text-[24px] leading-tight text-foreground">The log is empty</p>
       <p className="mx-auto mt-1.5 max-w-sm text-pretty text-[14px] text-muted-foreground">
         Place a call to the front desk and it&rsquo;ll be logged here with a written summary once it
@@ -127,19 +204,5 @@ function EmptyState({ onStart }: { onStart: () => void }) {
         <Phone className="size-4" /> Start the first call
       </Button>
     </div>
-  );
-}
-
-function LedgerSkeleton() {
-  return (
-    <ul className="space-y-1.5">
-      {[0, 1, 2, 3].map((i) => (
-        <li
-          key={i}
-          className="h-[58px] animate-pulse rounded-xl border border-border/60 bg-card/60"
-          style={{ animationDelay: `${i * 60}ms` }}
-        />
-      ))}
-    </ul>
   );
 }

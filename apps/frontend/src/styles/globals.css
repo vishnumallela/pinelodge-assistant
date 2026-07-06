@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "shadcn/tailwind.css";
+@import "tw-animate-css";
 
 @custom-variant pf-hover {
   @media (hover: hover) and (pointer: fine) {
@@ -146,6 +147,25 @@
   min-width: 44px;
   min-height: 44px;
   transform: translate(-50%, -50%);
+}
+
+/* react-day-picker themed to the ledger */
+.pinelodge-calendar {
+  --rdp-accent-color: var(--brand);
+  --rdp-accent-background-color: var(--brand-soft);
+  --rdp-today-color: var(--brand);
+  --rdp-selected-border: 1px solid var(--brand);
+  --rdp-outside-opacity: 0.4;
+  --rdp-day-height: 34px;
+  --rdp-day-width: 34px;
+  --rdp-day_button-height: 32px;
+  --rdp-day_button-width: 32px;
+  --rdp-day_button-border-radius: 8px;
+  --rdp-font-family: var(--font-sans);
+  font-size: 13px;
+}
+.pinelodge-calendar .rdp-selected {
+  font-weight: 600;
 }
 
 .scrollbar-subtle {
