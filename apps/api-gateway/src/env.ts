@@ -19,10 +19,9 @@ const schema = z.object({
         .filter(Boolean),
     ),
 
-  OPENAI_API_KEY: z.string().optional(),
-  OPENAI_REALTIME_MODEL: z.string().default("gpt-realtime-2"),
-  OPENAI_REALTIME_VOICE: z.string().default("marin"),
-  OPENAI_TRANSCRIBE_MODEL: z.string().default("whisper-1"),
+  XAI_API_KEY: z.string().optional(),
+  GROK_REALTIME_MODEL: z.string().default("grok-voice-latest"),
+  GROK_REALTIME_VOICE: z.string().default("eve"),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -37,8 +36,7 @@ export const env = {
   AUTH_URL: raw.BETTER_AUTH_URL,
   PORT: raw.PORT ?? raw.API_PORT,
   ALLOWED_ORIGINS: raw.AUTH_TRUSTED_ORIGINS,
-  OPENAI_API_KEY: raw.OPENAI_API_KEY,
-  OPENAI_REALTIME_MODEL: raw.OPENAI_REALTIME_MODEL,
-  OPENAI_REALTIME_VOICE: raw.OPENAI_REALTIME_VOICE,
-  OPENAI_TRANSCRIBE_MODEL: raw.OPENAI_TRANSCRIBE_MODEL,
+  XAI_API_KEY: raw.XAI_API_KEY,
+  GROK_REALTIME_MODEL: raw.GROK_REALTIME_MODEL,
+  GROK_REALTIME_VOICE: raw.GROK_REALTIME_VOICE,
 } as const;

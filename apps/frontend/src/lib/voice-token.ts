@@ -12,14 +12,8 @@ export async function fetchVoiceToken(): Promise<VoiceTokenInfo> {
     token?: string;
     model?: string;
     voice?: string;
-    transcribeModel?: string;
     error?: string;
   };
   if (!r.ok || !data.token) throw new Error(data.error ?? "Could not start the call.");
-  return {
-    token: data.token,
-    model: data.model,
-    voice: data.voice,
-    transcribeModel: data.transcribeModel,
-  };
+  return { token: data.token, model: data.model, voice: data.voice };
 }

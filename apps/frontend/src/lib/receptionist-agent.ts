@@ -5,11 +5,6 @@ export const AGENT_NAME = "Sarah";
 
 export const GREETING = `Thank you for calling ${FACILITY_NAME}, this is ${AGENT_NAME}. How can I help you today?`;
 
-/** Keyword list for whisper-1 so names and facility terms transcribe correctly. */
-export const TRANSCRIPTION_HINT =
-  `${FACILITY_NAME}, Sheri, Mira, Richa, Dessa, Medicaid, admissions, billing, ` +
-  "resident, tour, assisted living";
-
 export const STAFF_DIRECTORY = [
   { name: "Sheri", section: "Admissions", handles: "tours, moving in, pricing" },
   { name: "Mira", section: "Billing", handles: "invoices, insurance, Medicaid" },
@@ -19,7 +14,9 @@ export const STAFF_DIRECTORY = [
 
 export function buildInstructions(): string {
   return [
-    `You are ${AGENT_NAME}, the front desk receptionist at ${FACILITY_NAME}. Be warm and brief: one or two short sentences per turn, one question at a time. Say the greeting once and never repeat yourself.`,
+    `You are ${AGENT_NAME}, the front desk receptionist at ${FACILITY_NAME}. Be warm and brief: one or two short sentences per turn, one question at a time. Never repeat yourself.`,
+    "",
+    `Start every call by saying exactly: "${GREETING}" — once, and never again.`,
     "",
     "Staff directory:",
     JSON.stringify(STAFF_DIRECTORY, null, 2),

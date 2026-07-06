@@ -9,14 +9,12 @@ import {
   buildInstructions,
   buildReceptionistTools,
   CALLER_PROMPTS,
-  GREETING,
-  TRANSCRIPTION_HINT,
 } from "@/lib/receptionist-agent";
 
 /**
  * One call at a time: the browser plays the caller, Sarah answers over
- * WebRTC. Her only tool is end_call — she announces who she is redirecting
- * the caller to, then hangs up once her audio finishes.
+ * Grok realtime voice. Her only tool is end_call — she announces who she is
+ * redirecting the caller to, then hangs up once her audio finishes.
  */
 
 export interface FeedItem {
@@ -55,8 +53,6 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     getToken: fetchVoiceToken,
     instructions,
     tools,
-    greeting: GREETING,
-    transcriptionPrompt: TRANSCRIPTION_HINT,
     onError: (m) => toast.error(m),
   });
 

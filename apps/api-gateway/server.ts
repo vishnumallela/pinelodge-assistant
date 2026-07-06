@@ -43,25 +43,20 @@ async function sessionUser(req: Request): Promise<{ id: string } | null> {
   }
 }
 
-/** Mint a short-lived OpenAI Realtime client secret (ek_...) so the browser
- *  can open a WebRTC call without ever seeing our standard API key. */
+/** Mint a short-lived xAI realtime client secret so the browser can open a
+ *  Grok voice WebSocket without ever seeing our standard API key. The session
+ *  (voice, instructions, tools, VAD) is configured client-side via
+ *  session.update after the socket opens. */
 async function mintVoiceToken(req: Request): Promise<Response> {
   const user = await sessionUser(req);
   if (!user) return json({ error: "Sign in to start a call." }, 401);
-  if (!env.OPENAI_API_KEY) {
-    return json({ error: "OPENAI_API_KEY is not set. Add it to .env and restart." }, 500);
+  if (!env.XAI_API_KEY) {
+    return json({ error: "XAI_API_KEY is not set. Add it to .env and restart." }, 500);
   }
-  const r = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
+  const r = await fetch("https://api.x.ai/v1/realtime/client_secrets", {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${env.OPENAI_API_KEY}` },
-    body: JSON.stringify({
-      expires_after: { anchor: "created_at", seconds: 600 },
-      session: {
-        type: "realtime",
-        model: env.OPENAI_REALTIME_MODEL,
-        audio: { output: { voice: env.OPENAI_REALTIME_VOICE } },
-      },
-    }),
+    headers: { "content-type": "application/json", authorization: `Bearer ${env.XAI_API_KEY}` },
+    body: JSON.stringify({ expires_after: { seconds: 600 } }),
   });
   const text = await r.text();
   if (!r.ok) {
@@ -74,16 +69,19 @@ async function mintVoiceToken(req: Request): Promise<Response> {
   } catch {
     /* ignore */
   }
-  const token =
+  // Response shapes have varied over time; accept the common ones.
+  const candidate =
     (data.value as string | undefined) ??
+    (data.secret as string | undefined) ??
+    (data.token as string | undefined) ??
     (data.client_secret as { value?: string } | undefined)?.value ??
-    "";
+    (typeof data.client_secret === "string" ? data.client_secret : undefined);
+  const token = String(candidate ?? "").replace(/^xai-client-secret\./, "");
   if (!token) return json({ error: "Could not parse token from provider." }, 502);
   return json({
     token,
-    model: env.OPENAI_REALTIME_MODEL,
-    voice: env.OPENAI_REALTIME_VOICE,
-    transcribeModel: env.OPENAI_TRANSCRIBE_MODEL,
+    model: env.GROK_REALTIME_MODEL,
+    voice: env.GROK_REALTIME_VOICE,
   });
 }
 

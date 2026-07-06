@@ -1,17 +1,24 @@
 /**
- * OpenAI Realtime (WebRTC) voice-agent hook for gpt-realtime-2.
- * The mic goes out as an RTP audio track, the agent's speech arrives as a
- * remote track, and JSON events flow over the "oai-events" data channel.
- * The browser only ever sees a short-lived ephemeral token (ek_...) minted
- * by our backend — never the provider API key.
+ * xAI Grok realtime voice hook — raw WebSocket to wss://api.x.ai/v1/realtime.
+ *
+ * Grok's realtime API is OpenAI-Realtime compatible at the event level, but
+ * the browser transport is a WebSocket carrying base64 PCM16 audio, so this
+ * hook does the audio plumbing itself:
+ *
+ *   - mic capture → resample to 24 kHz → PCM16 → base64 → input_audio_buffer.append
+ *   - server audio → response.output_audio.delta (base64 PCM16) → scheduled playback
+ *   - server VAD handles turn-taking; local playback clears on barge-in
+ *
+ * The xAI API key never reaches the browser: the backend mints a short-lived
+ * ephemeral client secret, passed as the WS subprotocol.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-const CALLS_ENDPOINT = "https://api.openai.com/v1/realtime/calls";
-const DEFAULT_MODEL = "gpt-realtime-2";
-const DEFAULT_VOICE = "marin";
-const DEFAULT_TRANSCRIBE_MODEL = "whisper-1";
+const TARGET_RATE = 24000;
+const WS_ENDPOINT = "wss://api.x.ai/v1/realtime";
+const DEFAULT_MODEL = "grok-voice-latest";
+const DEFAULT_VOICE = "eve";
 
 export interface VoiceFunctionTool {
   type: "function";
@@ -25,17 +32,12 @@ export interface VoiceTokenInfo {
   token: string;
   model?: string;
   voice?: string;
-  transcribeModel?: string;
 }
 
 export interface UseVoiceAgentOptions {
   getToken: () => Promise<VoiceTokenInfo>;
   instructions?: string;
   tools?: VoiceFunctionTool[];
-  /** Domain vocabulary hint for the transcription model. */
-  transcriptionPrompt?: string;
-  /** If set, the agent speaks this exact opening line right after connect. */
-  greeting?: string;
   onError?: (message: string) => void;
 }
 
@@ -64,6 +66,114 @@ export interface UseVoiceAgentReturn {
   sendText: (text: string) => void;
 }
 
+/* ── audio helpers ────────────────────────────────────────────────────── */
+
+function floatToBase64PCM16(input: Float32Array): string {
+  const pcm = new Int16Array(input.length);
+  for (let i = 0; i < input.length; i++) {
+    const s = Math.max(-1, Math.min(1, input[i]!));
+    pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+  }
+  const bytes = new Uint8Array(pcm.buffer);
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+function base64ToInt16(b64: string): Int16Array {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Int16Array(bytes.buffer, 0, Math.floor(bytes.byteLength / 2));
+}
+
+function resampleTo24k(input: Float32Array, inputRate: number): Float32Array {
+  if (inputRate === TARGET_RATE) return input;
+  const ratio = inputRate / TARGET_RATE;
+  const outLen = Math.round(input.length / ratio);
+  const out = new Float32Array(outLen);
+  for (let i = 0; i < outLen; i++) {
+    const idx = i * ratio;
+    const i0 = Math.floor(idx);
+    const i1 = Math.min(i0 + 1, input.length - 1);
+    const frac = idx - i0;
+    out[i] = input[i0]! * (1 - frac) + input[i1]! * frac;
+  }
+  return out;
+}
+
+/** Schedules base64 PCM16 chunks into gap-free playback. */
+class PcmPlayer {
+  ctx: AudioContext;
+  gain: GainNode;
+  playhead = 0;
+  sources = new Set<AudioBufferSourceNode>();
+
+  constructor() {
+    type Ctor = typeof AudioContext;
+    const AC = (window.AudioContext ||
+      (window as unknown as { webkitAudioContext: Ctor }).webkitAudioContext) as Ctor;
+    try {
+      this.ctx = new AC({ sampleRate: TARGET_RATE });
+    } catch {
+      this.ctx = new AC();
+    }
+    this.gain = this.ctx.createGain();
+    this.gain.connect(this.ctx.destination);
+  }
+
+  resume(): void {
+    if (this.ctx.state === "suspended") void this.ctx.resume();
+  }
+
+  enqueue(int16: Int16Array): void {
+    if (int16.length === 0) return;
+    const f32 = new Float32Array(int16.length);
+    for (let i = 0; i < int16.length; i++) f32[i] = int16[i]! / 32768;
+    const audioBuf = this.ctx.createBuffer(1, f32.length, TARGET_RATE);
+    audioBuf.copyToChannel(f32, 0);
+    const src = this.ctx.createBufferSource();
+    src.buffer = audioBuf;
+    src.connect(this.gain);
+    const startAt = Math.max(this.ctx.currentTime + 0.02, this.playhead);
+    src.start(startAt);
+    this.playhead = startAt + audioBuf.duration;
+    this.sources.add(src);
+    src.onended = () => this.sources.delete(src);
+  }
+
+  /** Barge-in: stop everything currently scheduled. */
+  clear(): void {
+    for (const s of this.sources) {
+      try {
+        s.stop();
+      } catch {
+        /* already stopped */
+      }
+    }
+    this.sources.clear();
+    this.playhead = this.ctx.currentTime;
+  }
+
+  get isPlaying(): boolean {
+    return this.playhead > this.ctx.currentTime + 0.05;
+  }
+
+  close(): void {
+    this.clear();
+    try {
+      void this.ctx.close();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/* ── the hook ─────────────────────────────────────────────────────────── */
+
 export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentReturn {
   const optsRef = useRef(options);
   optsRef.current = options;
@@ -76,20 +186,20 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
   const [isMuted, setIsMuted] = useState(false);
   const [history, setHistory] = useState<VoiceHistoryItem[]>([]);
 
-  const pcRef = useRef<RTCPeerConnection | null>(null);
-  const dcRef = useRef<RTCDataChannel | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const micCtxRef = useRef<AudioContext | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
-  const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const playerRef = useRef<PcmPlayer | null>(null);
   const mutedRef = useRef(false);
+  const rafRef = useRef<number | null>(null);
   const genRef = useRef(0);
   const greetedRef = useRef(false);
-  const voiceConfigRef = useRef({
-    voice: DEFAULT_VOICE,
-    transcribeModel: DEFAULT_TRANSCRIBE_MODEL,
-  });
+  const canStreamRef = useRef(false); // AEC warm-up gate
+  const agentSpeakingRef = useRef(false);
   const userSpeakingRef = useRef(false);
   const pendingToolResponseRef = useRef(false);
-  const activeResponseRef = useRef(false);
+  const voiceRef = useRef(DEFAULT_VOICE);
 
   const fail = useCallback((message: string) => {
     setStatus("error");
@@ -101,8 +211,8 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
   }, []);
 
   const sendEvent = useCallback((event: Record<string, unknown>) => {
-    const dc = dcRef.current;
-    if (dc && dc.readyState === "open") dc.send(JSON.stringify(event));
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event));
   }, []);
 
   const upsert = useCallback(
@@ -125,39 +235,34 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
 
   const buildSession = useCallback((): Record<string, unknown> => {
     const o = optsRef.current;
-    const cfg = voiceConfigRef.current;
     return {
       type: "session.update",
       session: {
         type: "realtime",
-        output_modalities: ["audio"],
+        voice: voiceRef.current,
         instructions: o.instructions ?? "You are a helpful voice assistant.",
+        turn_detection: {
+          type: "server_vad",
+          threshold: 0.5,
+          silence_duration_ms: 600,
+          prefix_padding_ms: 300,
+        },
+        audio: {
+          input: {
+            format: { type: "audio/pcm", rate: TARGET_RATE },
+            transcription: {},
+          },
+          output: {
+            format: { type: "audio/pcm", rate: TARGET_RATE },
+            speed: 1.0,
+          },
+        },
         tools: (o.tools ?? []).map((t) => ({
           type: "function",
           name: t.name,
           description: t.description,
           parameters: t.parameters,
         })),
-        tool_choice: "auto",
-        audio: {
-          input: {
-            transcription: {
-              model: cfg.transcribeModel,
-              language: "en",
-              ...(o.transcriptionPrompt ? { prompt: o.transcriptionPrompt } : {}),
-            },
-            noise_reduction: { type: "far_field" },
-            turn_detection: {
-              type: "semantic_vad",
-              eagerness: "auto",
-              create_response: true,
-              interrupt_response: true,
-            },
-          },
-          output: {
-            voice: cfg.voice,
-          },
-        },
       },
     };
   }, []);
@@ -190,9 +295,9 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
           output: typeof output === "string" ? output : JSON.stringify(output),
         },
       });
-      // Defer the follow-up response if the user is mid-utterance or another
-      // response is active; speech_stopped / response.done fire it later.
-      if (userSpeakingRef.current || activeResponseRef.current) {
+      // If the user started talking while the tool ran, defer response.create
+      // until they stop (avoids clipping their first word).
+      if (userSpeakingRef.current) {
         pendingToolResponseRef.current = true;
       } else {
         sendEvent({ type: "response.create" });
@@ -205,28 +310,41 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
   const handleServerEvent = useCallback(
     (ev: { type: string; [k: string]: unknown }) => {
       switch (ev.type) {
+        case "session.created":
+          sendEvent(buildSession());
+          // AEC warm-up: let the echo canceller learn the room before mic
+          // audio streams, so the agent doesn't answer itself on speakers.
+          window.setTimeout(() => {
+            canStreamRef.current = true;
+          }, 1200);
+          break;
+
         case "session.updated":
-          if (status !== "connected") setStatus("connected");
-          if (optsRef.current.greeting && !greetedRef.current) {
+          setStatus("connected");
+          if (!greetedRef.current) {
             greetedRef.current = true;
-            sendEvent({
-              type: "response.create",
-              response: {
-                instructions: `Say exactly this, as one utterance, and nothing else: "${optsRef.current.greeting}"`,
-              },
-            });
+            // The greeting line lives in the instructions; this kicks it off.
+            sendEvent({ type: "response.create" });
           }
           break;
 
         case "input_audio_buffer.speech_started":
           userSpeakingRef.current = true;
           setIsUserSpeaking(true);
+          // Barge-in: cut the agent off and stop generation so the server's
+          // context matches what the user actually heard.
+          if (agentSpeakingRef.current) {
+            playerRef.current?.clear();
+            agentSpeakingRef.current = false;
+            setIsAgentSpeaking(false);
+            sendEvent({ type: "response.cancel" });
+          }
           break;
 
         case "input_audio_buffer.speech_stopped":
           userSpeakingRef.current = false;
           setIsUserSpeaking(false);
-          if (pendingToolResponseRef.current && !activeResponseRef.current) {
+          if (pendingToolResponseRef.current) {
             pendingToolResponseRef.current = false;
             sendEvent({ type: "response.create" });
           }
@@ -245,21 +363,23 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
         }
 
         case "response.created":
-          activeResponseRef.current = true;
           setIsAgentThinking(true);
           break;
 
-        case "output_audio_buffer.started":
-          setIsAgentSpeaking(true);
-          setIsAgentThinking(false);
+        case "response.output_audio.delta": {
+          const delta = ev.delta as string | undefined;
+          if (delta) {
+            agentSpeakingRef.current = true;
+            setIsAgentSpeaking(true);
+            setIsAgentThinking(false);
+            playerRef.current?.resume();
+            playerRef.current?.enqueue(base64ToInt16(delta));
+          }
           break;
+        }
 
-        case "output_audio_buffer.stopped":
-        case "output_audio_buffer.cleared":
-          setIsAgentSpeaking(false);
-          break;
-
-        case "response.output_audio_transcript.done": {
+        case "response.output_audio_transcript.done":
+        case "response.audio_transcript.done": {
           const text = ((ev.transcript as string) ?? "").trim();
           if (text) {
             upsert((ev.item_id as string) ?? crypto.randomUUID(), {
@@ -277,12 +397,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
           break;
 
         case "response.done":
-          activeResponseRef.current = false;
           setIsAgentThinking(false);
-          if (pendingToolResponseRef.current && !userSpeakingRef.current) {
-            pendingToolResponseRef.current = false;
-            sendEvent({ type: "response.create" });
-          }
           break;
 
         case "error": {
@@ -299,35 +414,73 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
           break;
       }
     },
-    [fail, runToolCall, sendEvent, status, upsert],
+    [buildSession, fail, runToolCall, sendEvent, upsert],
   );
 
+  const startMic = useCallback(async () => {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+      },
+    });
+    micStreamRef.current = stream;
+    type Ctor = typeof AudioContext;
+    const AC = (window.AudioContext ||
+      (window as unknown as { webkitAudioContext: Ctor }).webkitAudioContext) as Ctor;
+    const ctx = new AC();
+    micCtxRef.current = ctx;
+    const source = ctx.createMediaStreamSource(stream);
+    const processor = ctx.createScriptProcessor(4096, 1, 1);
+    processorRef.current = processor;
+
+    processor.onaudioprocess = (e) => {
+      if (mutedRef.current || !canStreamRef.current) return;
+      const input = e.inputBuffer.getChannelData(0);
+      const resampled = resampleTo24k(input, ctx.sampleRate);
+      sendEvent({
+        type: "input_audio_buffer.append",
+        audio: floatToBase64PCM16(resampled),
+      });
+    };
+
+    source.connect(processor);
+    // ScriptProcessor needs a sink to fire; route to a muted gain.
+    const sink = ctx.createGain();
+    sink.gain.value = 0;
+    processor.connect(sink);
+    sink.connect(ctx.destination);
+  }, [sendEvent]);
+
   const teardown = useCallback(() => {
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    try {
+      processorRef.current?.disconnect();
+    } catch {
+      /* ignore */
+    }
+    processorRef.current = null;
     micStreamRef.current?.getTracks().forEach((t) => t.stop());
     micStreamRef.current = null;
-    if (audioElRef.current) {
-      audioElRef.current.srcObject = null;
-      audioElRef.current = null;
+    try {
+      void micCtxRef.current?.close();
+    } catch {
+      /* ignore */
     }
-    const dc = dcRef.current;
-    dcRef.current = null;
-    if (dc) {
-      dc.onmessage = null;
-      dc.onopen = null;
-      dc.onclose = null;
+    micCtxRef.current = null;
+    playerRef.current?.close();
+    playerRef.current = null;
+    const ws = wsRef.current;
+    wsRef.current = null;
+    if (ws) {
+      ws.onmessage = null;
+      ws.onclose = null;
+      ws.onerror = null;
       try {
-        dc.close();
-      } catch {
-        /* ignore */
-      }
-    }
-    const pc = pcRef.current;
-    pcRef.current = null;
-    if (pc) {
-      pc.ontrack = null;
-      pc.onconnectionstatechange = null;
-      try {
-        pc.close();
+        ws.close();
       } catch {
         /* ignore */
       }
@@ -346,14 +499,15 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
   }, [teardown]);
 
   const connect = useCallback(async () => {
-    if (pcRef.current) return;
+    if (wsRef.current) return;
     const myGen = ++genRef.current;
     setHistory([]);
     setStatus("connecting");
     greetedRef.current = false;
-    pendingToolResponseRef.current = false;
+    canStreamRef.current = false;
+    agentSpeakingRef.current = false;
     userSpeakingRef.current = false;
-    activeResponseRef.current = false;
+    pendingToolResponseRef.current = false;
 
     let tokenInfo: VoiceTokenInfo;
     try {
@@ -364,22 +518,12 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
       return;
     }
     if (myGen !== genRef.current) return;
-    voiceConfigRef.current = {
-      voice: tokenInfo.voice ?? DEFAULT_VOICE,
-      transcribeModel: tokenInfo.transcribeModel ?? DEFAULT_TRANSCRIBE_MODEL,
-    };
+    voiceRef.current = tokenInfo.voice ?? DEFAULT_VOICE;
 
-    let mic: MediaStream;
     try {
-      mic = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          channelCount: 1,
-        },
-      });
+      await startMic();
     } catch (e) {
+      teardown();
       fail(
         e instanceof Error && e.name === "NotAllowedError"
           ? "Microphone permission denied"
@@ -388,97 +532,61 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
       return;
     }
     if (myGen !== genRef.current) {
-      mic.getTracks().forEach((t) => t.stop());
+      teardown();
       return;
     }
-    micStreamRef.current = mic;
-    if (mutedRef.current) mic.getAudioTracks().forEach((t) => (t.enabled = false));
 
-    const pc = new RTCPeerConnection();
-    pcRef.current = pc;
-    for (const track of mic.getAudioTracks()) pc.addTrack(track, mic);
+    playerRef.current = new PcmPlayer();
 
-    const audioEl = new Audio();
-    audioEl.autoplay = true;
-    audioElRef.current = audioEl;
+    const key = tokenInfo.token;
+    const proto = key.startsWith("xai-client-secret.") ? key : `xai-client-secret.${key}`;
+    const model = tokenInfo.model ?? DEFAULT_MODEL;
+    const ws = new WebSocket(`${WS_ENDPOINT}?model=${encodeURIComponent(model)}`, [proto]);
+    wsRef.current = ws;
 
-    pc.ontrack = (e) => {
-      if (myGen !== genRef.current) return;
-      const stream = e.streams[0];
-      if (!stream) return;
-      audioEl.srcObject = stream;
-      void audioEl.play().catch(() => undefined);
-    };
-
-    pc.onconnectionstatechange = () => {
-      if (myGen !== genRef.current) return;
-      if (pc.connectionState === "failed") {
-        fail("Connection lost. Check your network and try again.");
-      } else if (pc.connectionState === "disconnected" || pc.connectionState === "closed") {
-        setStatus((s) => (s === "error" ? s : "closed"));
-      }
-    };
-
-    const dc = pc.createDataChannel("oai-events");
-    dcRef.current = dc;
-    dc.onopen = () => {
-      if (myGen !== genRef.current) return;
-      sendEvent(buildSession());
-    };
-    dc.onmessage = (msg) => {
+    ws.onmessage = (msg) => {
       if (myGen !== genRef.current) return;
       try {
-        handleServerEvent(JSON.parse(msg.data as string));
+        handleServerEvent(JSON.parse(msg.data as string) as { type: string });
       } catch {
         /* ignore malformed frame */
       }
     };
+    ws.onerror = () => {
+      if (myGen !== genRef.current) return;
+      fail("Connection lost. Check your network and try again.");
+    };
+    ws.onclose = () => {
+      if (myGen !== genRef.current) return;
+      setStatus((s) => (s === "error" ? s : "closed"));
+    };
 
-    try {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      const model = tokenInfo.model ?? DEFAULT_MODEL;
-      const resp = await fetch(`${CALLS_ENDPOINT}?model=${encodeURIComponent(model)}`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${tokenInfo.token}`,
-          "Content-Type": "application/sdp",
-        },
-        body: offer.sdp,
-      });
-      if (!resp.ok) {
-        const detail = await resp.text().catch(() => "");
-        throw new Error(`Realtime call setup failed (${resp.status}) ${detail.slice(0, 160)}`);
+    // Drive the agent-speaking flag off actual playback state.
+    const tick = () => {
+      if (myGen !== genRef.current) return;
+      const playing = playerRef.current?.isPlaying ?? false;
+      if (playing !== agentSpeakingRef.current) {
+        agentSpeakingRef.current = playing;
+        setIsAgentSpeaking(playing);
       }
-      const answer = await resp.text();
-      if (myGen !== genRef.current) return;
-      await pc.setRemoteDescription({ type: "answer", sdp: answer });
-    } catch (e) {
-      if (myGen !== genRef.current) return;
-      fail(e instanceof Error ? e.message : "Could not start the call.");
-      teardown();
-    }
-  }, [buildSession, fail, handleServerEvent, sendEvent, teardown]);
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+  }, [fail, handleServerEvent, startMic, teardown]);
 
   const toggleMute = useCallback(() => {
     mutedRef.current = !mutedRef.current;
-    micStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = !mutedRef.current));
     setIsMuted(mutedRef.current);
   }, []);
 
   const sendText = useCallback(
     (text: string) => {
       const trimmed = text.trim();
-      if (!trimmed) return;
+      if (!trimmed || !wsRef.current) return;
       sendEvent({
         type: "conversation.item.create",
         item: { type: "message", role: "user", content: [{ type: "input_text", text: trimmed }] },
       });
-      // Cancel an in-flight response so the reply sees this message.
-      if (activeResponseRef.current) {
-        sendEvent({ type: "response.cancel" });
-        sendEvent({ type: "output_audio_buffer.clear" });
-      }
       sendEvent({ type: "response.create" });
       upsert(crypto.randomUUID(), { role: "user", text: trimmed, status: "completed" });
     },
