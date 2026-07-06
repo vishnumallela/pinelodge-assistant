@@ -101,6 +101,7 @@ export interface StaffInput {
   name: string;
   section: string;
   handles: string;
+  phone: string;
   days: number[];
   startTime: string;
   endTime: string;
@@ -112,6 +113,7 @@ export interface StaffInput {
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
+const E164 = /^\+[1-9]\d{6,14}$/;
 
 /** Validate + coerce an arbitrary body; returns null when unusable. */
 export function readStaffInput(body: unknown): StaffInput | null {
@@ -133,6 +135,7 @@ export function readStaffInput(body: unknown): StaffInput | null {
     name,
     section,
     handles: typeof b.handles === "string" ? b.handles.trim() : "",
+    phone: typeof b.phone === "string" && E164.test(b.phone.trim()) ? b.phone.trim() : "",
     days,
     startTime,
     endTime,
@@ -141,6 +144,28 @@ export function readStaffInput(body: unknown): StaffInput | null {
     active: b.active !== false,
     sort: typeof b.sort === "number" ? b.sort : undefined,
   };
+}
+
+export interface TransferTarget {
+  name: string;
+  section: string;
+  phone: string;
+}
+
+/** Resolve a spoken staff name to a transferable number. The person must be
+ *  active, on shift right now, and have a phone; otherwise fall back to the
+ *  starred fallback (if reachable). Returns null when nobody can take it. */
+export async function findTransferTarget(spokenName: string): Promise<TransferTarget | null> {
+  const rows = await listStaff();
+  const wanted = spokenName.trim().toLowerCase();
+  const match = rows.find((s) => s.name.toLowerCase() === wanted && s.active);
+  if (match?.availableNow && match.phone) {
+    return { name: match.name, section: match.section, phone: match.phone };
+  }
+  const fallback = rows.find((s) => s.isFallback && s.active && s.availableNow && s.phone);
+  return fallback
+    ? { name: fallback.name, section: fallback.section, phone: fallback.phone }
+    : null;
 }
 
 /** Setting a fallback unsets every other one — exactly one at all times. */

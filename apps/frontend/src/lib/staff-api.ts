@@ -7,6 +7,8 @@ export interface StaffMember {
   name: string;
   section: string;
   handles: string;
+  /** E.164 number calls transfer to; empty means announce-only. */
+  phone: string;
   /** Working days, 0 (Sun) – 6 (Sat). */
   days: number[];
   /** "HH:MM" 24h, facility timezone. */

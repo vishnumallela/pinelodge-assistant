@@ -44,4 +44,5 @@ export async function ensureSchema(): Promise<void> {
       value jsonb NOT NULL
     )
   `;
+  await client`ALTER TABLE staff ADD COLUMN IF NOT EXISTS phone text NOT NULL DEFAULT ''`;
 }

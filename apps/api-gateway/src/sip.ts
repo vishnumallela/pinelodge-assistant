@@ -3,9 +3,10 @@ import { eq } from "drizzle-orm";
 import { endCall as lockCall, saveTranscript } from "./calls";
 import { db } from "./db";
 import { env } from "./env";
-import { getAgentPrompt } from "./prompt";
+import { getAgentPrompt, PHONE_TRANSFER_APPENDIX } from "./prompt";
 import { enqueueSummary } from "./queue";
 import { calls, settings, type TranscriptTurn } from "./schema";
+import { findTransferTarget } from "./staff";
 
 /**
  * SIP integration (xAI Direct SIP), env-gated by XAI_SIP_WEBHOOK_SECRET.
@@ -203,6 +204,58 @@ export async function handleSipWebhook(req: Request): Promise<Response> {
   return Response.json({ ok: true });
 }
 
+/** Resolve a spoken name and REFER the SIP leg to their phone. */
+async function handleSipTransfer(
+  sipCallId: string,
+  toolCallId: string,
+  argsRaw: string,
+  transcript: TranscriptTurn[],
+  send: (e: Record<string, unknown>) => void,
+): Promise<void> {
+  let name = "";
+  try {
+    name = String((JSON.parse(argsRaw) as { name?: unknown }).name ?? "");
+  } catch {
+    /* leave empty */
+  }
+  const target = name ? await findTransferTarget(name) : null;
+  if (!target) {
+    send({
+      type: "conversation.item.create",
+      item: {
+        type: "function_call_output",
+        call_id: toolCallId,
+        output: JSON.stringify({ error: "Nobody is available to take this transfer right now." }),
+      },
+    });
+    send({ type: "response.create" });
+    return;
+  }
+  transcript.push({
+    role: "assistant",
+    text: `(transferring the caller to ${target.name} in ${target.section})`,
+  });
+  send({
+    type: "conversation.item.create",
+    item: {
+      type: "function_call_output",
+      call_id: toolCallId,
+      output: JSON.stringify({ ok: true, connecting: target.name }),
+    },
+  });
+  // xAI SIP call control: REFER the call leg to the target number.
+  try {
+    await fetch(`https://api.x.ai/v1/realtime/calls/${sipCallId}/refer`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${env.XAI_API_KEY}` },
+      body: JSON.stringify({ target_uri: `tel:${target.phone}` }),
+      signal: AbortSignal.timeout(10000),
+    });
+  } catch {
+    /* the socket close path still finalizes the record */
+  }
+}
+
 /** Drive one inbound SIP call end-to-end over the realtime WebSocket. */
 async function runSipAgent(callId: string, from: string): Promise<void> {
   const userId = `${SIP_USER_PREFIX}:${from}`;
@@ -250,7 +303,7 @@ async function runSipAgent(callId: string, from: string): Promise<void> {
         session: {
           type: "realtime",
           voice: env.GROK_REALTIME_VOICE,
-          instructions: prompt,
+          instructions: `${prompt}\n\n${PHONE_TRANSFER_APPENDIX}`,
           reasoning: { effort: "none" },
           turn_detection: {
             type: "server_vad",
@@ -263,9 +316,25 @@ async function runSipAgent(callId: string, from: string): Promise<void> {
           tools: [
             {
               type: "function",
+              name: "transfer_call",
+              description:
+                "Connect the caller to a staff member's phone. Call this right after you announce the redirect and say goodbye.",
+              parameters: {
+                type: "object",
+                properties: {
+                  name: {
+                    type: "string",
+                    description: "Exact name of the staff member from the directory",
+                  },
+                },
+                required: ["name"],
+              },
+            },
+            {
+              type: "function",
               name: "end_call",
               description:
-                "Hang up. Call this right after you say the redirect phrase and goodbye.",
+                "Hang up without transferring. Use when no transfer is possible, after saying goodbye.",
               parameters: { type: "object", properties: {}, required: [] },
             },
           ],
@@ -319,6 +388,14 @@ async function runSipAgent(callId: string, from: string): Promise<void> {
               },
             });
             hangupRequested = true;
+          } else if (ev.name === "transfer_call") {
+            void handleSipTransfer(
+              callId,
+              String(ev.call_id ?? ""),
+              String(ev.arguments ?? ""),
+              transcript,
+              send,
+            );
           }
           break;
         case "response.done":

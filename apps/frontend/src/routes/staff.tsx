@@ -91,6 +91,17 @@ const columns = [
       </span>
     ),
   }),
+  helper.accessor("phone", {
+    header: "Line",
+    cell: (info) =>
+      info.getValue() ? (
+        <span className="whitespace-nowrap text-[12.5px] tabular-nums text-muted-foreground">
+          {info.getValue()}
+        </span>
+      ) : (
+        <span className="text-[12px] text-muted-foreground/60">announce only</span>
+      ),
+  }),
   helper.display({
     id: "schedule",
     header: "Schedule",
@@ -152,6 +163,7 @@ const EMPTY_FORM: StaffInput = {
   name: "",
   section: "",
   handles: "",
+  phone: "",
   days: [1, 2, 3, 4, 5],
   startTime: "09:00",
   endTime: "17:00",
@@ -309,6 +321,7 @@ function StaffEditor({
           name: editing.name,
           section: editing.section,
           handles: editing.handles,
+          phone: editing.phone,
           days: editing.days,
           startTime: editing.startTime,
           endTime: editing.endTime,
@@ -340,7 +353,9 @@ function StaffEditor({
     onError: (e) => toast.error(e.message),
   });
 
-  const valid = form.name.trim() !== "" && form.section.trim() !== "" && form.days.length > 0;
+  const phoneOk = form.phone.trim() === "" || /^\+[1-9]\d{6,14}$/.test(form.phone.trim());
+  const valid =
+    form.name.trim() !== "" && form.section.trim() !== "" && form.days.length > 0 && phoneOk;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -383,6 +398,19 @@ function StaffEditor({
               onChange={(e) => set("handles", e.target.value)}
               placeholder="invoices, insurance, Medicaid"
             />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="staff-phone">Phone (E.164)</Label>
+            <Input
+              id="staff-phone"
+              value={form.phone}
+              onChange={(e) => set("phone", e.target.value)}
+              placeholder="+19547023000"
+            />
+            <p className="text-[12px] text-muted-foreground">
+              Calls transfer to this line. Leave empty to only announce the redirect.
+            </p>
           </div>
 
           <div className="space-y-2">

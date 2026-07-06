@@ -30,6 +30,14 @@ export const DEFAULT_TEMPLATE = [
   "Never give medical advice. If anyone may be in immediate danger, tell the caller to hang up and dial 911, then say you are redirecting them to the on-site care team, say goodbye, and call end_call.",
 ].join("\n");
 
+/** Appended to the rendered prompt on real phone calls, where the redirect
+ *  is an actual transfer instead of an announcement. */
+export const PHONE_TRANSFER_APPENDIX = [
+  "This caller is on a real phone line and you can actually connect them.",
+  'After you announce the redirect and say goodbye, call transfer_call with the person\'s exact name from the directory (e.g. {"name": "Mira"}) instead of end_call, and say nothing more.',
+  "If transfer_call returns an error, apologize, say the front office will call them back shortly, then say goodbye and call end_call.",
+].join(" ");
+
 async function getSetting<T>(key: string, fallback: T): Promise<T> {
   const [row] = await db.select().from(settings).where(eq(settings.key, key)).limit(1);
   return row ? (row.value as T) : fallback;

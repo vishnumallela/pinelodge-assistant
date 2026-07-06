@@ -3,9 +3,10 @@ import type { ServerWebSocket } from "bun";
 import { endCall as lockCall, saveTranscript } from "./calls";
 import { db } from "./db";
 import { env } from "./env";
-import { getAgentPrompt } from "./prompt";
+import { getAgentPrompt, PHONE_TRANSFER_APPENDIX } from "./prompt";
 import { enqueueSummary } from "./queue";
 import { calls, type TranscriptTurn } from "./schema";
+import { findTransferTarget, type TransferTarget } from "./staff";
 
 /**
  * Twilio Media Streams bridge — the phone path that needs no gated xAI
@@ -24,6 +25,23 @@ import { calls, type TranscriptTurn } from "./schema";
 
 export function twilioEnabled(): boolean {
   return Boolean(env.TWILIO_AUTH_TOKEN && env.XAI_API_KEY);
+}
+
+/** Transfers agreed mid-call, consumed by the resume webhook after the
+ *  stream closes. rowId → destination. Entries expire after five minutes. */
+const pendingTransfers = new Map<string, TransferTarget & { at: number }>();
+
+function setPendingTransfer(rowId: string, target: TransferTarget): void {
+  const cutoff = Date.now() - 5 * 60 * 1000;
+  for (const [k, v] of pendingTransfers) if (v.at < cutoff) pendingTransfers.delete(k);
+  pendingTransfers.set(rowId, { ...target, at: Date.now() });
+}
+
+function takePendingTransfer(rowId: string): TransferTarget | null {
+  const t = pendingTransfers.get(rowId);
+  if (!t) return null;
+  pendingTransfers.delete(rowId);
+  return Date.now() - t.at < 5 * 60 * 1000 ? t : null;
 }
 
 /** Twilio request validation: base64(HMAC-SHA1(authToken, url + sorted params)). */
@@ -56,9 +74,10 @@ export async function handleTwilioIncoming(req: Request, publicOrigin: string): 
       { status: 503 },
     );
   }
+  const reqUrl = new URL(req.url);
   const rawBody = await req.text();
   const params = new URLSearchParams(rawBody);
-  const url = `${publicOrigin}/api/twilio/incoming`;
+  const url = `${publicOrigin}${reqUrl.pathname}${reqUrl.search}`;
   if (!verifyTwilioSignature(url, params, req.headers.get("x-twilio-signature"))) {
     return Response.json({ error: "Invalid Twilio signature." }, { status: 401 });
   }
@@ -68,6 +87,8 @@ export async function handleTwilioIncoming(req: Request, publicOrigin: string): 
     .values({ userId: `phone:${from}` })
     .returning();
   const streamUrl = `${publicOrigin.replace(/^http/, "ws")}/api/twilio/stream`;
+  // When the stream closes, TwiML continues to <Redirect>: the resume handler
+  // dials the agreed transfer target, or hangs up if there is none.
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
@@ -76,6 +97,34 @@ export async function handleTwilioIncoming(req: Request, publicOrigin: string): 
       <Parameter name="from" value="${from.replaceAll('"', "")}" />
     </Stream>
   </Connect>
+  <Redirect method="POST">${publicOrigin}/api/twilio/resume?rowId=${row!.id}</Redirect>
+</Response>`;
+  return new Response(twiml, { headers: { "content-type": "text/xml" } });
+}
+
+/** After the stream ends: connect the caller to the transfer target, if the
+ *  agent arranged one, otherwise end the call. */
+export async function handleTwilioResume(req: Request, publicOrigin: string): Promise<Response> {
+  if (!twilioEnabled()) {
+    return Response.json({ error: "Twilio bridge is not configured." }, { status: 503 });
+  }
+  const reqUrl = new URL(req.url);
+  const rawBody = await req.text();
+  const params = new URLSearchParams(rawBody);
+  const url = `${publicOrigin}${reqUrl.pathname}${reqUrl.search}`;
+  if (!verifyTwilioSignature(url, params, req.headers.get("x-twilio-signature"))) {
+    return Response.json({ error: "Invalid Twilio signature." }, { status: 401 });
+  }
+  const rowId = reqUrl.searchParams.get("rowId") ?? "";
+  const target = rowId ? takePendingTransfer(rowId) : null;
+  const twiml = target
+    ? `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Dial>${target.phone}</Dial>
+</Response>`
+    : `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Hangup/>
 </Response>`;
   return new Response(twiml, { headers: { "content-type": "text/xml" } });
 }
@@ -169,7 +218,7 @@ class TwilioBridge {
         session: {
           type: "realtime",
           voice: env.GROK_REALTIME_VOICE,
-          instructions: prompt,
+          instructions: `${prompt}\n\n${PHONE_TRANSFER_APPENDIX}`,
           reasoning: { effort: "none" },
           turn_detection: {
             type: "server_vad",
@@ -187,9 +236,25 @@ class TwilioBridge {
           tools: [
             {
               type: "function",
+              name: "transfer_call",
+              description:
+                "Connect the caller to a staff member's phone. Call this right after you announce the redirect and say goodbye.",
+              parameters: {
+                type: "object",
+                properties: {
+                  name: {
+                    type: "string",
+                    description: "Exact name of the staff member from the directory",
+                  },
+                },
+                required: ["name"],
+              },
+            },
+            {
+              type: "function",
               name: "end_call",
               description:
-                "Hang up. Call this right after you say the redirect phrase and goodbye.",
+                "Hang up without transferring. Use when no transfer is possible, after saying goodbye.",
               parameters: { type: "object", properties: {}, required: [] },
             },
           ],
@@ -263,6 +328,8 @@ class TwilioBridge {
               },
             });
             this.hangupRequested = true;
+          } else if (ev.name === "transfer_call") {
+            void this.handleTransfer(String(ev.call_id ?? ""), String(ev.arguments ?? ""), send);
           }
           break;
         case "response.done":
@@ -278,6 +345,54 @@ class TwilioBridge {
     xai.addEventListener("error", () => {
       /* close follows */
     });
+  }
+
+  /** Resolve the spoken name to a reachable number; on success the resume
+   *  webhook dials it once the stream closes. */
+  private async handleTransfer(
+    callId: string,
+    argsRaw: string,
+    send: (e: Record<string, unknown>) => void,
+  ): Promise<void> {
+    let name = "";
+    try {
+      name = String((JSON.parse(argsRaw) as { name?: unknown }).name ?? "");
+    } catch {
+      /* leave empty */
+    }
+    const target = name ? await findTransferTarget(name) : null;
+    if (target && this.rowId) {
+      setPendingTransfer(this.rowId, target);
+      this.transcript.push({
+        role: "assistant",
+        text: `(transferring the caller to ${target.name} in ${target.section})`,
+      });
+      this.persist();
+      send({
+        type: "conversation.item.create",
+        item: {
+          type: "function_call_output",
+          call_id: callId,
+          output: JSON.stringify({ ok: true, connecting: `${target.name} in ${target.section}` }),
+        },
+      });
+      // Same exit as end_call: after the goodbye plays out, the stream closes
+      // and Twilio's <Redirect> dials the target.
+      this.hangupRequested = true;
+    } else {
+      send({
+        type: "conversation.item.create",
+        item: {
+          type: "function_call_output",
+          call_id: callId,
+          output: JSON.stringify({
+            error: "Nobody is available to take this transfer right now.",
+          }),
+        },
+      });
+      // Let the agent recover: apologize, offer a callback, then end_call.
+      send({ type: "response.create" });
+    }
   }
 
   private persist(): void {

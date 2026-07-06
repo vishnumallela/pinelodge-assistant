@@ -13,6 +13,7 @@ import {
 } from "./src/sip";
 import {
   handleTwilioIncoming,
+  handleTwilioResume,
   twilioEnabled,
   twilioWebSocketHandlers,
   type TwilioSocketData,
@@ -314,6 +315,8 @@ const server = Bun.serve<TwilioSocketData>({
     } else if (path === "/api/twilio/incoming" && req.method === "POST") {
       // Authenticated by X-Twilio-Signature, not by a browser session.
       res = await handleTwilioIncoming(req, publicUrl(req));
+    } else if (path === "/api/twilio/resume" && req.method === "POST") {
+      res = await handleTwilioResume(req, publicUrl(req));
     } else {
       const user = await sessionUser(req);
       if (!user) {

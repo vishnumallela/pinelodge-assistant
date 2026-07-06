@@ -37,6 +37,8 @@ export const staff = pgTable("staff", {
   name: text("name").notNull(),
   section: text("section").notNull(),
   handles: text("handles").notNull().default(""),
+  /** E.164 number calls transfer to; empty means announce-only. */
+  phone: text("phone").notNull().default(""),
   /** Working days, 0 (Sun) – 6 (Sat). */
   days: jsonb("days").$type<number[]>().notNull().default([1, 2, 3, 4, 5]),
   /** "HH:MM" 24h, facility timezone. */
