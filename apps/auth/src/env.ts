@@ -17,7 +17,7 @@ const schema = z.object({
   // Single-admin application: the only account that exists. Seeded on boot;
   // sign-ups are disabled and sign-in is restricted to this identity.
   ADMIN_EMAIL: z.string().email().default("vishnu@stackaisolutions.com"),
-  ADMIN_PASSWORD: z.string().min(8).default("password1234"),
+  ADMIN_PASSWORD: z.string().min(8).default("Password1234!"),
 
   // Server (PORT is injected by hosts like Railway; AUTH_PORT is the local default)
   PORT: z.coerce.number().int().positive().optional(),
