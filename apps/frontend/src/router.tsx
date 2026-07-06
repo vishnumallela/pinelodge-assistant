@@ -11,6 +11,7 @@ import { sessionQuery } from "@/lib/session";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { NotFound, RouteError } from "@/components/layout/RouteFallbacks";
 import { HomePage } from "@/routes/home";
+import { StaffPage } from "@/routes/staff";
 import { LoginPage } from "@/routes/login";
 
 interface RouterContext {
@@ -41,7 +42,16 @@ const appRoute = createRoute({
 
 const indexRoute = createRoute({ getParentRoute: () => appRoute, path: "/", component: HomePage });
 
-const routeTree = rootRoute.addChildren([loginRoute, appRoute.addChildren([indexRoute])]);
+const staffRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/staff",
+  component: StaffPage,
+});
+
+const routeTree = rootRoute.addChildren([
+  loginRoute,
+  appRoute.addChildren([indexRoute, staffRoute]),
+]);
 
 export const router = createRouter({
   routeTree,

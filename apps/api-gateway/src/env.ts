@@ -20,8 +20,9 @@ const schema = z.object({
     ),
 
   XAI_API_KEY: z.string().optional(),
-  GROK_REALTIME_MODEL: z.string().default("grok-voice-latest"),
-  GROK_REALTIME_VOICE: z.string().default("eve"),
+  // Pinned (not the -latest alias) so the model never migrates silently.
+  GROK_REALTIME_MODEL: z.string().default("grok-voice-think-fast-1.0"),
+  GROK_REALTIME_VOICE: z.string().default("ara"),
 });
 
 const parsed = schema.safeParse(process.env);

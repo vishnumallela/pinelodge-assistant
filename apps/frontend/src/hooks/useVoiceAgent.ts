@@ -1,13 +1,24 @@
 /**
  * xAI Grok realtime voice hook — raw WebSocket to wss://api.x.ai/v1/realtime.
  *
- * Grok's realtime API is OpenAI-Realtime compatible at the event level, but
- * the browser transport is a WebSocket carrying base64 PCM16 audio, so this
- * hook does the audio plumbing itself:
+ * Grok's realtime API is OpenAI-Realtime compatible at the event level; the
+ * browser transport is a WebSocket carrying base64 PCM16 audio. Latency-first
+ * design, per xAI docs + the official cookbook clients:
  *
- *   - mic capture → resample to 24 kHz → PCM16 → base64 → input_audio_buffer.append
- *   - server audio → response.output_audio.delta (base64 PCM16) → scheduled playback
- *   - server VAD handles turn-taking; local playback clears on barge-in
+ *   - capture: AudioWorklet on a shared 24 kHz AudioContext (the browser
+ *     resamples the mic natively — no lossy JS resampler), ~21 ms frames
+ *   - playback: AudioWorklet ring buffer, routed through an <audio> element
+ *     via MediaStreamDestination so the browser echo canceller sees it —
+ *     the mic no longer hears the agent, so barge-in is real speech only
+ *   - mic frames buffer locally while the socket configures, then flush,
+ *     so the caller can talk from the very first moment
+ *   - reasoning.effort "none" + server_vad silence 300 ms for fast turns
+ *   - greeting is a force_message item: server TTS speaks it verbatim with
+ *     zero model latency
+ *   - barge-in: flush the ring locally, drop late deltas of the cancelled
+ *     item, response.cancel, then conversation.item.truncate from the flush
+ *     ack (the only moment the played-frame count is exact)
+ *   - resumption enabled; one automatic reconnect with conversation_id
  *
  * The xAI API key never reaches the browser: the backend mints a short-lived
  * ephemeral client secret, passed as the WS subprotocol.
@@ -17,8 +28,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const TARGET_RATE = 24000;
 const WS_ENDPOINT = "wss://api.x.ai/v1/realtime";
-const DEFAULT_MODEL = "grok-voice-latest";
-const DEFAULT_VOICE = "eve";
+const DEFAULT_MODEL = "grok-voice-think-fast-1.0";
+const DEFAULT_VOICE = "ara";
+/** Cap on mic audio buffered before the session is configured (~3 s). */
+const PREBUFFER_MAX_CHUNKS = 150;
+/** Drop mic frames rather than queue them on a congested socket. */
+const BACKPRESSURE_BYTES = 64 * 1024;
 
 export interface VoiceFunctionTool {
   type: "function";
@@ -26,6 +41,8 @@ export interface VoiceFunctionTool {
   description?: string;
   parameters: Record<string, unknown>;
   handler?: (args: Record<string, unknown>) => Promise<unknown> | unknown;
+  /** Skip the follow-up response.create (e.g. end_call — nothing to say). */
+  suppressResponse?: boolean;
 }
 
 export interface VoiceTokenInfo {
@@ -38,6 +55,8 @@ export interface UseVoiceAgentOptions {
   getToken: () => Promise<VoiceTokenInfo>;
   instructions?: string;
   tools?: VoiceFunctionTool[];
+  /** Spoken verbatim by the server (force_message) as the call opens. */
+  greeting?: string;
   onError?: (message: string) => void;
 }
 
@@ -66,7 +85,107 @@ export interface UseVoiceAgentReturn {
   sendText: (text: string) => void;
 }
 
-/* ── audio helpers ────────────────────────────────────────────────────── */
+/* ── audio worklets ───────────────────────────────────────────────────────
+ * Both processors live in one Blob module. Capture accumulates render quanta
+ * and posts ~21 ms Float32 frames (transferred, zero-copy). The player is a
+ * ring buffer: enqueue via port, 48 ms prebuffer after empty, sample-accurate
+ * flush on barge-in, and it reports playing-state transitions + frames played
+ * (the truncation clock — exact in the flush ack).
+ */
+
+const WORKLET_SOURCE = `
+class PLCapture extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    this.flush = options.processorOptions.flushFrames;
+    this.buf = new Float32Array(this.flush);
+    this.n = 0;
+  }
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (!ch) return true;
+    let i = 0;
+    while (i < ch.length) {
+      const take = Math.min(ch.length - i, this.flush - this.n);
+      this.buf.set(ch.subarray(i, i + take), this.n);
+      this.n += take;
+      i += take;
+      if (this.n === this.flush) {
+        const out = this.buf;
+        this.port.postMessage(out, [out.buffer]);
+        this.buf = new Float32Array(this.flush);
+        this.n = 0;
+      }
+    }
+    return true;
+  }
+}
+class PLPlayer extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    this.chunks = [];
+    this.offset = 0;
+    this.buffered = 0;
+    this.played = 0;
+    this.playing = false;
+    this.waiting = true;
+    this.hold = options.processorOptions.holdFrames;
+    this.port.onmessage = (e) => {
+      const d = e.data;
+      if (d === "flush") {
+        this.chunks = [];
+        this.offset = 0;
+        this.buffered = 0;
+        this.waiting = true;
+        this.port.postMessage({ type: "flushed", played: this.played });
+        if (this.playing) {
+          this.playing = false;
+          this.port.postMessage({ type: "state", playing: false, played: this.played });
+        }
+      } else {
+        this.chunks.push(d);
+        this.buffered += d.length;
+      }
+    };
+  }
+  process(_inputs, outputs) {
+    const out = outputs[0] && outputs[0][0];
+    if (!out) return true;
+    if (this.waiting && this.buffered >= this.hold) this.waiting = false;
+    if (this.waiting || this.buffered === 0) {
+      if (this.buffered === 0) this.waiting = true;
+      if (this.playing) {
+        this.playing = false;
+        this.port.postMessage({ type: "state", playing: false, played: this.played });
+      }
+      return true;
+    }
+    let i = 0;
+    while (i < out.length && this.chunks.length > 0) {
+      const head = this.chunks[0];
+      const take = Math.min(out.length - i, head.length - this.offset);
+      out.set(head.subarray(this.offset, this.offset + take), i);
+      i += take;
+      this.offset += take;
+      this.buffered -= take;
+      this.played += take;
+      if (this.offset === head.length) {
+        this.chunks.shift();
+        this.offset = 0;
+      }
+    }
+    if (!this.playing) {
+      this.playing = true;
+      this.port.postMessage({ type: "state", playing: true });
+    }
+    return true;
+  }
+}
+registerProcessor("pl-capture", PLCapture);
+registerProcessor("pl-player", PLPlayer);
+`;
+
+/* ── PCM helpers ──────────────────────────────────────────────────────── */
 
 function floatToBase64PCM16(input: Float32Array): string {
   const pcm = new Int16Array(input.length);
@@ -83,16 +202,20 @@ function floatToBase64PCM16(input: Float32Array): string {
   return btoa(binary);
 }
 
-function base64ToInt16(b64: string): Int16Array {
+function base64ToFloat32(b64: string): Float32Array {
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new Int16Array(bytes.buffer, 0, Math.floor(bytes.byteLength / 2));
+  const int16 = new Int16Array(bytes.buffer, 0, Math.floor(bytes.byteLength / 2));
+  const f32 = new Float32Array(int16.length);
+  for (let i = 0; i < int16.length; i++) f32[i] = int16[i]! / 32768;
+  return f32;
 }
 
-function resampleTo24k(input: Float32Array, inputRate: number): Float32Array {
-  if (inputRate === TARGET_RATE) return input;
-  const ratio = inputRate / TARGET_RATE;
+/** Playback-only resample for the fallback path (context not at 24 kHz). */
+function resampleLinear(input: Float32Array, fromRate: number, toRate: number): Float32Array {
+  if (fromRate === toRate) return input;
+  const ratio = fromRate / toRate;
   const outLen = Math.round(input.length / ratio);
   const out = new Float32Array(outLen);
   for (let i = 0; i < outLen; i++) {
@@ -103,73 +226,6 @@ function resampleTo24k(input: Float32Array, inputRate: number): Float32Array {
     out[i] = input[i0]! * (1 - frac) + input[i1]! * frac;
   }
   return out;
-}
-
-/** Schedules base64 PCM16 chunks into gap-free playback. */
-class PcmPlayer {
-  ctx: AudioContext;
-  gain: GainNode;
-  playhead = 0;
-  sources = new Set<AudioBufferSourceNode>();
-
-  constructor() {
-    type Ctor = typeof AudioContext;
-    const AC = (window.AudioContext ||
-      (window as unknown as { webkitAudioContext: Ctor }).webkitAudioContext) as Ctor;
-    try {
-      this.ctx = new AC({ sampleRate: TARGET_RATE });
-    } catch {
-      this.ctx = new AC();
-    }
-    this.gain = this.ctx.createGain();
-    this.gain.connect(this.ctx.destination);
-  }
-
-  resume(): void {
-    if (this.ctx.state === "suspended") void this.ctx.resume();
-  }
-
-  enqueue(int16: Int16Array): void {
-    if (int16.length === 0) return;
-    const f32 = new Float32Array(int16.length);
-    for (let i = 0; i < int16.length; i++) f32[i] = int16[i]! / 32768;
-    const audioBuf = this.ctx.createBuffer(1, f32.length, TARGET_RATE);
-    audioBuf.copyToChannel(f32, 0);
-    const src = this.ctx.createBufferSource();
-    src.buffer = audioBuf;
-    src.connect(this.gain);
-    const startAt = Math.max(this.ctx.currentTime + 0.02, this.playhead);
-    src.start(startAt);
-    this.playhead = startAt + audioBuf.duration;
-    this.sources.add(src);
-    src.onended = () => this.sources.delete(src);
-  }
-
-  /** Barge-in: stop everything currently scheduled. */
-  clear(): void {
-    for (const s of this.sources) {
-      try {
-        s.stop();
-      } catch {
-        /* already stopped */
-      }
-    }
-    this.sources.clear();
-    this.playhead = this.ctx.currentTime;
-  }
-
-  get isPlaying(): boolean {
-    return this.playhead > this.ctx.currentTime + 0.05;
-  }
-
-  close(): void {
-    this.clear();
-    try {
-      void this.ctx.close();
-    } catch {
-      /* ignore */
-    }
-  }
 }
 
 /* ── the hook ─────────────────────────────────────────────────────────── */
@@ -187,28 +243,38 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
   const [history, setHistory] = useState<VoiceHistoryItem[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const micCtxRef = useRef<AudioContext | null>(null);
+  const ctxRef = useRef<AudioContext | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const playerRef = useRef<PcmPlayer | null>(null);
+  const captureNodeRef = useRef<AudioWorkletNode | null>(null);
+  const playerNodeRef = useRef<AudioWorkletNode | null>(null);
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
   const mutedRef = useRef(false);
-  const rafRef = useRef<number | null>(null);
+  const silentFrameRef = useRef<{ len: number; b64: string } | null>(null);
   const genRef = useRef(0);
-  const greetedRef = useRef(false);
-  const canStreamRef = useRef(false); // AEC warm-up gate
-  const agentSpeakingRef = useRef(false);
+  const connectingRef = useRef(false);
+  const ctxRateRef = useRef(TARGET_RATE);
+  const configSentRef = useRef(false);
+  const preBufferRef = useRef<string[]>([]);
+  const connectedTimerRef = useRef<number | null>(null);
   const userSpeakingRef = useRef(false);
+  const agentSpeakingRef = useRef(false);
+  const agentThinkingRef = useRef(false);
+  const responseActiveRef = useRef(false);
   const pendingToolResponseRef = useRef(false);
   const voiceRef = useRef(DEFAULT_VOICE);
-
-  const fail = useCallback((message: string) => {
-    setStatus("error");
-    try {
-      optsRef.current.onError?.(message);
-    } catch {
-      /* ignore */
-    }
-  }, []);
+  const instructionsRef = useRef<string | undefined>(undefined);
+  const greetingSentRef = useRef(false);
+  const conversationIdRef = useRef<string | null>(null);
+  const reconnectsLeftRef = useRef(1);
+  const wasConnectedRef = useRef(false);
+  // Truncation clock: frames enqueued to the player, and where the current
+  // assistant audio item started — resynced to the exact played count on
+  // every flush ack / drain (the ring is empty at those moments).
+  const enqueuedFramesRef = useRef(0);
+  const playedFramesRef = useRef(0);
+  const currentItemRef = useRef<{ id: string; startFrame: number } | null>(null);
+  const pendingTruncateRef = useRef<{ id: string; startFrame: number } | null>(null);
+  const droppedItemRef = useRef<string | null>(null);
 
   const sendEvent = useCallback((event: Record<string, unknown>) => {
     const ws = wsRef.current;
@@ -233,26 +299,105 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
     [],
   );
 
-  const buildSession = useCallback((): Record<string, unknown> => {
+  const teardown = useCallback(() => {
+    if (connectedTimerRef.current != null) {
+      window.clearTimeout(connectedTimerRef.current);
+      connectedTimerRef.current = null;
+    }
+    captureNodeRef.current?.port.close();
+    try {
+      captureNodeRef.current?.disconnect();
+    } catch {
+      /* ignore */
+    }
+    captureNodeRef.current = null;
+    playerNodeRef.current?.port.close();
+    try {
+      playerNodeRef.current?.disconnect();
+    } catch {
+      /* ignore */
+    }
+    playerNodeRef.current = null;
+    micStreamRef.current?.getTracks().forEach((t) => t.stop());
+    micStreamRef.current = null;
+    if (audioElRef.current) {
+      audioElRef.current.srcObject = null;
+      audioElRef.current = null;
+    }
+    try {
+      void ctxRef.current?.close();
+    } catch {
+      /* ignore */
+    }
+    ctxRef.current = null;
+    const ws = wsRef.current;
+    wsRef.current = null;
+    if (ws) {
+      ws.onmessage = null;
+      ws.onclose = null;
+      ws.onerror = null;
+      try {
+        ws.close();
+      } catch {
+        /* ignore */
+      }
+    }
+    preBufferRef.current = [];
+    configSentRef.current = false;
+    agentSpeakingRef.current = false;
+    agentThinkingRef.current = false;
+    responseActiveRef.current = false;
+    setIsUserSpeaking(false);
+    setIsAgentSpeaking(false);
+    setIsAgentThinking(false);
+    setIsToolRunning(false);
+  }, []);
+
+  /** Terminal failure: release the mic and surface the message. */
+  const fail = useCallback(
+    (message: string) => {
+      teardown();
+      setStatus("error");
+      try {
+        optsRef.current.onError?.(message);
+      } catch {
+        /* ignore */
+      }
+    },
+    [teardown],
+  );
+
+  const sendSessionConfig = useCallback(() => {
+    if (configSentRef.current) return;
+    configSentRef.current = true;
     const o = optsRef.current;
-    return {
+    sendEvent({
       type: "session.update",
       session: {
         type: "realtime",
         voice: voiceRef.current,
-        instructions: o.instructions ?? "You are a helpful voice assistant.",
+        // Snapshotted at connect() so a reconnect resumes with the exact
+        // prompt the call started with.
+        instructions: instructionsRef.current ?? "You are a helpful voice assistant.",
+        // Extended reasoning defaults on and costs ~0.5s time-to-first-audio;
+        // a single-tool receptionist doesn't need it.
+        reasoning: { effort: "none" },
         turn_detection: {
           type: "server_vad",
-          threshold: 0.5,
-          silence_duration_ms: 600,
+          threshold: 0.6,
+          silence_duration_ms: 300,
           prefix_padding_ms: 300,
+          idle_timeout_ms: 15000,
         },
+        resumption: { enabled: true },
         audio: {
           input: {
-            format: { type: "audio/pcm", rate: TARGET_RATE },
-            transcription: {},
+            format: { type: "audio/pcm", rate: ctxRateRef.current },
+            transcription: { model: "grok-transcribe" },
           },
           output: {
+            // Always 24 kHz from the server; the fallback path resamples
+            // locally to the context rate on enqueue.
             format: { type: "audio/pcm", rate: TARGET_RATE },
             speed: 1.0,
           },
@@ -263,8 +408,43 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
           description: t.description,
           parameters: t.parameters,
         })),
+        // Server drops transcribed input that matches what the agent just
+        // said — a second line of defence against echo re-triggering VAD.
+        enable_echo_detection_filtering: true,
       },
-    };
+    });
+    // Scripted greeting: the server TTS-speaks a force_message verbatim with
+    // zero model latency; exactly once per call, never on reconnect.
+    if (o.greeting && !greetingSentRef.current) {
+      greetingSentRef.current = true;
+      sendEvent({
+        type: "conversation.item.create",
+        item: {
+          type: "force_message",
+          role: "assistant",
+          content: [{ type: "output_text", text: o.greeting }],
+        },
+      });
+    }
+    // Mic audio buffered during setup goes out now, oldest first.
+    for (const audio of preBufferRef.current)
+      sendEvent({ type: "input_audio_buffer.append", audio });
+    preBufferRef.current = [];
+    // xAI does not consistently ACK session.update; don't gate the call on it.
+    if (connectedTimerRef.current != null) window.clearTimeout(connectedTimerRef.current);
+    const myGen = genRef.current;
+    connectedTimerRef.current = window.setTimeout(() => {
+      if (myGen !== genRef.current) return;
+      setStatus((s) => (s === "connecting" ? "connected" : s));
+    }, 2000);
+  }, [sendEvent]);
+
+  const flushPlayback = useCallback(() => {
+    // MessagePort.postMessage has no targetOrigin — the rule targets Window.
+    // oxlint-disable-next-line unicorn/require-post-message-target-origin
+    playerNodeRef.current?.port.postMessage("flush");
+    agentSpeakingRef.current = false;
+    setIsAgentSpeaking(false);
   }, []);
 
   const runToolCall = useCallback(
@@ -295,60 +475,87 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
           output: typeof output === "string" ? output : JSON.stringify(output),
         },
       });
-      // If the user started talking while the tool ran, defer response.create
-      // until they stop (avoids clipping their first word).
-      if (userSpeakingRef.current) {
-        pendingToolResponseRef.current = true;
-      } else {
-        sendEvent({ type: "response.create" });
+      if (!tool?.suppressResponse) {
+        // Defer the follow-up until the line is actually free: mid-utterance
+        // or mid-playback response.create overlaps audio.
+        if (userSpeakingRef.current || agentSpeakingRef.current) {
+          pendingToolResponseRef.current = true;
+        } else {
+          sendEvent({ type: "response.create" });
+        }
       }
       setIsToolRunning(false);
     },
     [sendEvent],
   );
 
+  const maybeFirePendingResponse = useCallback(() => {
+    if (pendingToolResponseRef.current && !userSpeakingRef.current && !agentSpeakingRef.current) {
+      pendingToolResponseRef.current = false;
+      sendEvent({ type: "response.create" });
+    }
+  }, [sendEvent]);
+
   const handleServerEvent = useCallback(
     (ev: { type: string; [k: string]: unknown }) => {
       switch (ev.type) {
+        case "conversation.created":
+          wasConnectedRef.current = true;
+          conversationIdRef.current =
+            ((ev.conversation as { id?: string } | undefined)?.id as string | undefined) ??
+            (ev.conversation_id as string | undefined) ??
+            conversationIdRef.current;
+          sendSessionConfig();
+          break;
+
         case "session.created":
-          sendEvent(buildSession());
-          // AEC warm-up: let the echo canceller learn the room before mic
-          // audio streams, so the agent doesn't answer itself on speakers.
-          window.setTimeout(() => {
-            canStreamRef.current = true;
-          }, 1200);
+          wasConnectedRef.current = true;
+          sendSessionConfig();
           break;
 
         case "session.updated":
-          setStatus("connected");
-          if (!greetedRef.current) {
-            greetedRef.current = true;
-            // The greeting line lives in the instructions; this kicks it off.
-            sendEvent({ type: "response.create" });
+          if (connectedTimerRef.current != null) {
+            window.clearTimeout(connectedTimerRef.current);
+            connectedTimerRef.current = null;
           }
+          setStatus("connected");
           break;
 
-        case "input_audio_buffer.speech_started":
+        case "input_audio_buffer.speech_started": {
           userSpeakingRef.current = true;
           setIsUserSpeaking(true);
-          // Barge-in: cut the agent off and stop generation so the server's
-          // context matches what the user actually heard.
-          if (agentSpeakingRef.current) {
-            playerRef.current?.clear();
-            agentSpeakingRef.current = false;
-            setIsAgentSpeaking(false);
+          // Barge-in: anything generating or still in the ring (including the
+          // prebuffer window before "playing" flips) gets cut. The truncate
+          // itself is sent from the flush ack — the only exact played count.
+          const audioPending = enqueuedFramesRef.current > playedFramesRef.current;
+          if (
+            agentSpeakingRef.current ||
+            agentThinkingRef.current ||
+            responseActiveRef.current ||
+            audioPending
+          ) {
+            pendingTruncateRef.current = currentItemRef.current;
+            droppedItemRef.current = currentItemRef.current?.id ?? null;
+            flushPlayback();
             sendEvent({ type: "response.cancel" });
           }
           break;
+        }
 
         case "input_audio_buffer.speech_stopped":
           userSpeakingRef.current = false;
           setIsUserSpeaking(false);
-          if (pendingToolResponseRef.current) {
-            pendingToolResponseRef.current = false;
-            sendEvent({ type: "response.create" });
-          }
+          maybeFirePendingResponse();
           break;
+
+        // Grok streams a cumulative, self-correcting user transcript —
+        // replace, never append.
+        case "conversation.item.input_audio_transcription.updated": {
+          const text = ((ev.transcript as string) ?? "").trim();
+          const id = ev.item_id as string | undefined;
+          if (text && id) upsert(id, { role: "user", text, status: "in_progress" });
+          break;
+        }
 
         case "conversation.item.input_audio_transcription.completed": {
           const text = ((ev.transcript as string) ?? "").trim();
@@ -363,18 +570,31 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
         }
 
         case "response.created":
+          responseActiveRef.current = true;
+          agentThinkingRef.current = true;
+          droppedItemRef.current = null;
           setIsAgentThinking(true);
           break;
 
-        case "response.output_audio.delta": {
+        case "response.output_audio.delta":
+        case "response.audio.delta": {
           const delta = ev.delta as string | undefined;
-          if (delta) {
-            agentSpeakingRef.current = true;
-            setIsAgentSpeaking(true);
-            setIsAgentThinking(false);
-            playerRef.current?.resume();
-            playerRef.current?.enqueue(base64ToInt16(delta));
+          if (!delta) break;
+          const itemId = (ev.item_id as string | undefined) ?? "unknown";
+          // Late frames of an interrupted item keep streaming after the
+          // cancel — playing them would talk over the caller.
+          if (droppedItemRef.current !== null && itemId === droppedItemRef.current) break;
+          agentThinkingRef.current = false;
+          setIsAgentThinking(false);
+          if (currentItemRef.current?.id !== itemId) {
+            currentItemRef.current = { id: itemId, startFrame: enqueuedFramesRef.current };
           }
+          let f32 = base64ToFloat32(delta);
+          if (ctxRateRef.current !== TARGET_RATE) {
+            f32 = resampleLinear(f32, TARGET_RATE, ctxRateRef.current);
+          }
+          enqueuedFramesRef.current += f32.length;
+          playerNodeRef.current?.port.postMessage(f32, [f32.buffer]);
           break;
         }
 
@@ -397,16 +617,25 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
           break;
 
         case "response.done":
+          responseActiveRef.current = false;
+          agentThinkingRef.current = false;
           setIsAgentThinking(false);
+          maybeFirePendingResponse();
           break;
 
         case "error": {
-          const e = ev.error as { message?: string } | undefined;
+          const e = ev.error as { message?: string; code?: string } | undefined;
           const msg = e?.message ?? "Realtime error";
-          // Benign races (cancelling a finished response, etc.) are ignored.
-          if (!/not found|no active response|cancel|already has an active response/i.test(msg)) {
-            fail(msg);
+          const code = e?.code ?? "";
+          // Benign races and optional features the server may not accept.
+          if (
+            /not found|no active response|cancel|already has an active response|truncate|echo_detection|force_message/i.test(
+              `${msg} ${code}`,
+            )
+          ) {
+            break;
           }
+          fail(msg);
           break;
         }
 
@@ -414,165 +643,272 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
           break;
       }
     },
-    [buildSession, fail, runToolCall, sendEvent, upsert],
+    [
+      fail,
+      flushPlayback,
+      maybeFirePendingResponse,
+      runToolCall,
+      sendEvent,
+      sendSessionConfig,
+      upsert,
+    ],
   );
 
-  const startMic = useCallback(async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({
+  /* ── audio pipeline ─────────────────────────────────────────────────── */
+
+  const setupAudio = useCallback(async (): Promise<void> => {
+    const mic = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
         channelCount: 1,
+        // Hardware voice isolation where available; ignored elsewhere.
+        ...({ voiceIsolation: true } as MediaTrackConstraints),
       },
     });
-    micStreamRef.current = stream;
-    type Ctor = typeof AudioContext;
-    const AC = (window.AudioContext ||
-      (window as unknown as { webkitAudioContext: Ctor }).webkitAudioContext) as Ctor;
-    const ctx = new AC();
-    micCtxRef.current = ctx;
-    const source = ctx.createMediaStreamSource(stream);
-    const processor = ctx.createScriptProcessor(4096, 1, 1);
-    processorRef.current = processor;
+    micStreamRef.current = mic;
 
-    processor.onaudioprocess = (e) => {
-      if (mutedRef.current || !canStreamRef.current) return;
-      const input = e.inputBuffer.getChannelData(0);
-      const resampled = resampleTo24k(input, ctx.sampleRate);
-      sendEvent({
-        type: "input_audio_buffer.append",
-        audio: floatToBase64PCM16(resampled),
-      });
-    };
-
-    source.connect(processor);
-    // ScriptProcessor needs a sink to fire; route to a muted gain.
-    const sink = ctx.createGain();
-    sink.gain.value = 0;
-    processor.connect(sink);
-    sink.connect(ctx.destination);
-  }, [sendEvent]);
-
-  const teardown = useCallback(() => {
-    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-    rafRef.current = null;
+    // One shared context at the wire rate: the browser sinc-resamples the mic
+    // natively, so no lossy JS resampler and no server-side resample either.
+    let attempt: AudioContext | undefined;
+    let ctx: AudioContext;
+    let source: MediaStreamAudioSourceNode;
     try {
-      processorRef.current?.disconnect();
+      attempt = new AudioContext({ sampleRate: TARGET_RATE, latencyHint: "interactive" });
+      source = attempt.createMediaStreamSource(mic);
+      ctx = attempt;
+      ctxRateRef.current = TARGET_RATE;
     } catch {
-      /* ignore */
-    }
-    processorRef.current = null;
-    micStreamRef.current?.getTracks().forEach((t) => t.stop());
-    micStreamRef.current = null;
-    try {
-      void micCtxRef.current?.close();
-    } catch {
-      /* ignore */
-    }
-    micCtxRef.current = null;
-    playerRef.current?.close();
-    playerRef.current = null;
-    const ws = wsRef.current;
-    wsRef.current = null;
-    if (ws) {
-      ws.onmessage = null;
-      ws.onclose = null;
-      ws.onerror = null;
+      // Older Firefox can't mix stream/context rates: run at the device rate,
+      // declare it for input, and resample playback locally.
       try {
-        ws.close();
+        void attempt?.close();
       } catch {
         /* ignore */
       }
+      ctx = new AudioContext({ latencyHint: "interactive" });
+      source = ctx.createMediaStreamSource(mic);
+      ctxRateRef.current = Math.round(ctx.sampleRate);
     }
-  }, []);
+    ctxRef.current = ctx;
+    void ctx.resume();
+
+    const workletUrl = URL.createObjectURL(
+      new Blob([WORKLET_SOURCE], { type: "application/javascript" }),
+    );
+    try {
+      await ctx.audioWorklet.addModule(workletUrl);
+    } finally {
+      URL.revokeObjectURL(workletUrl);
+    }
+
+    // ~21 ms mic frames, in whole render quanta.
+    const flushFrames = Math.max(1, Math.round((ctxRateRef.current * 0.021) / 128)) * 128;
+    const capture = new AudioWorkletNode(ctx, "pl-capture", {
+      numberOfInputs: 1,
+      numberOfOutputs: 0,
+      processorOptions: { flushFrames },
+    });
+    captureNodeRef.current = capture;
+    capture.port.onmessage = (e: MessageEvent<Float32Array>) => {
+      const ws = wsRef.current;
+      const live = configSentRef.current && ws && ws.readyState === WebSocket.OPEN;
+      if (live && ws.bufferedAmount > BACKPRESSURE_BYTES) return;
+      // While muted, stream silence instead of nothing: dropping frames
+      // freezes the server's VAD timeline mid-utterance.
+      let audio: string;
+      if (mutedRef.current) {
+        if (silentFrameRef.current?.len !== e.data.length) {
+          silentFrameRef.current = {
+            len: e.data.length,
+            b64: floatToBase64PCM16(new Float32Array(e.data.length)),
+          };
+        }
+        audio = silentFrameRef.current.b64;
+      } else {
+        audio = floatToBase64PCM16(e.data);
+      }
+      if (live) {
+        ws.send(JSON.stringify({ type: "input_audio_buffer.append", audio }));
+      } else {
+        preBufferRef.current.push(audio);
+        if (preBufferRef.current.length > PREBUFFER_MAX_CHUNKS) preBufferRef.current.shift();
+      }
+    };
+    source.connect(capture);
+
+    // Player worklet → MediaStreamDestination → <audio>: media-element
+    // playback runs through the echo-cancellation reference path, so the mic
+    // does not hear the agent.
+    const player = new AudioWorkletNode(ctx, "pl-player", {
+      numberOfInputs: 0,
+      numberOfOutputs: 1,
+      outputChannelCount: [1],
+      processorOptions: { holdFrames: Math.round(ctxRateRef.current * 0.048) },
+    });
+    playerNodeRef.current = player;
+    player.port.onmessage = (
+      e: MessageEvent<{ type: string; playing?: boolean; played?: number }>,
+    ) => {
+      const d = e.data;
+      if (typeof d.played === "number") {
+        playedFramesRef.current = d.played;
+        // The ring is empty at every flush/drain report: the enqueue clock
+        // re-anchors to reality (discarded frames never play).
+        enqueuedFramesRef.current = d.played;
+        if (d.type === "flushed") {
+          currentItemRef.current = null;
+          const t = pendingTruncateRef.current;
+          pendingTruncateRef.current = null;
+          if (t && t.id !== "unknown") {
+            const playedMs = Math.max(
+              0,
+              Math.round(((d.played - t.startFrame) / ctxRateRef.current) * 1000),
+            );
+            sendEvent({
+              type: "conversation.item.truncate",
+              item_id: t.id,
+              content_index: 0,
+              audio_end_ms: playedMs,
+            });
+          }
+        }
+      }
+      if (d.type === "state") {
+        agentSpeakingRef.current = Boolean(d.playing);
+        setIsAgentSpeaking(Boolean(d.playing));
+        if (!d.playing) maybeFirePendingResponse();
+      }
+    };
+    const sink = ctx.createMediaStreamDestination();
+    player.connect(sink);
+    const audioEl = new Audio();
+    audioEl.srcObject = sink.stream;
+    audioEl.autoplay = true;
+    audioElRef.current = audioEl;
+    void audioEl.play().catch(() => undefined);
+  }, [maybeFirePendingResponse, sendEvent]);
 
   const disconnect = useCallback(() => {
     genRef.current++;
-    greetedRef.current = false;
+    connectingRef.current = false;
     teardown();
+    conversationIdRef.current = null;
+    wasConnectedRef.current = false;
     setStatus("closed");
-    setIsUserSpeaking(false);
-    setIsAgentSpeaking(false);
-    setIsAgentThinking(false);
-    setIsToolRunning(false);
   }, [teardown]);
 
+  const openSocket = useCallback(
+    (myGen: number, tokenInfo: VoiceTokenInfo) => {
+      configSentRef.current = false;
+      const key = tokenInfo.token;
+      const proto = key.startsWith("xai-client-secret.") ? key : `xai-client-secret.${key}`;
+      const model = tokenInfo.model ?? DEFAULT_MODEL;
+      const params = new URLSearchParams({ model, "reasoning.effort": "none" });
+      if (conversationIdRef.current) params.set("conversation_id", conversationIdRef.current);
+      const ws = new WebSocket(`${WS_ENDPOINT}?${params.toString()}`, [proto]);
+      wsRef.current = ws;
+
+      ws.onmessage = (msg) => {
+        if (myGen !== genRef.current) return;
+        try {
+          handleServerEvent(JSON.parse(msg.data as string) as { type: string });
+        } catch {
+          /* ignore malformed frame */
+        }
+      };
+      ws.onerror = () => {
+        /* onclose always follows and carries the decision */
+      };
+      ws.onclose = () => {
+        if (myGen !== genRef.current) return;
+        // Unexpected drop mid-call: resume once with the conversation id —
+        // the server replays cached history.
+        if (wasConnectedRef.current && reconnectsLeftRef.current > 0) {
+          reconnectsLeftRef.current--;
+          setStatus("connecting");
+          void (async () => {
+            try {
+              const t = await optsRef.current.getToken();
+              if (myGen !== genRef.current) return;
+              openSocket(myGen, t);
+            } catch {
+              if (myGen !== genRef.current) return;
+              fail("Connection lost. Check your network and try again.");
+            }
+          })();
+          return;
+        }
+        if (!wasConnectedRef.current) {
+          fail("Could not reach the voice service. Try again.");
+          return;
+        }
+        // Server ended the call: release the mic before reporting closed.
+        teardown();
+        setStatus((s) => (s === "error" ? s : "closed"));
+      };
+    },
+    [fail, handleServerEvent, teardown],
+  );
+
   const connect = useCallback(async () => {
-    if (wsRef.current) return;
+    if (wsRef.current || connectingRef.current) return;
+    connectingRef.current = true;
     const myGen = ++genRef.current;
     setHistory([]);
     setStatus("connecting");
-    greetedRef.current = false;
-    canStreamRef.current = false;
-    agentSpeakingRef.current = false;
+    conversationIdRef.current = null;
+    wasConnectedRef.current = false;
+    greetingSentRef.current = false;
+    reconnectsLeftRef.current = 1;
     userSpeakingRef.current = false;
+    agentSpeakingRef.current = false;
+    agentThinkingRef.current = false;
+    responseActiveRef.current = false;
     pendingToolResponseRef.current = false;
-
-    let tokenInfo: VoiceTokenInfo;
-    try {
-      tokenInfo = await optsRef.current.getToken();
-      if (!tokenInfo?.token) throw new Error("No token returned");
-    } catch (e) {
-      fail(e instanceof Error ? e.message : "Could not get a voice token");
-      return;
-    }
-    if (myGen !== genRef.current) return;
-    voiceRef.current = tokenInfo.voice ?? DEFAULT_VOICE;
+    pendingTruncateRef.current = null;
+    droppedItemRef.current = null;
+    preBufferRef.current = [];
+    enqueuedFramesRef.current = 0;
+    playedFramesRef.current = 0;
+    currentItemRef.current = null;
+    instructionsRef.current = optsRef.current.instructions;
 
     try {
-      await startMic();
-    } catch (e) {
-      teardown();
-      fail(
-        e instanceof Error && e.name === "NotAllowedError"
-          ? "Microphone permission denied"
-          : `Microphone error: ${e instanceof Error ? e.message : String(e)}`,
-      );
-      return;
-    }
-    if (myGen !== genRef.current) {
-      teardown();
-      return;
-    }
-
-    playerRef.current = new PcmPlayer();
-
-    const key = tokenInfo.token;
-    const proto = key.startsWith("xai-client-secret.") ? key : `xai-client-secret.${key}`;
-    const model = tokenInfo.model ?? DEFAULT_MODEL;
-    const ws = new WebSocket(`${WS_ENDPOINT}?model=${encodeURIComponent(model)}`, [proto]);
-    wsRef.current = ws;
-
-    ws.onmessage = (msg) => {
-      if (myGen !== genRef.current) return;
-      try {
-        handleServerEvent(JSON.parse(msg.data as string) as { type: string });
-      } catch {
-        /* ignore malformed frame */
+      // Token and audio pipeline in parallel — the mic buffers locally until
+      // the session is configured, so nothing the caller says is lost.
+      const [tokenResult, audioResult] = await Promise.allSettled([
+        optsRef.current.getToken(),
+        setupAudio(),
+      ]);
+      if (myGen !== genRef.current) {
+        teardown();
+        return;
       }
-    };
-    ws.onerror = () => {
-      if (myGen !== genRef.current) return;
-      fail("Connection lost. Check your network and try again.");
-    };
-    ws.onclose = () => {
-      if (myGen !== genRef.current) return;
-      setStatus((s) => (s === "error" ? s : "closed"));
-    };
-
-    // Drive the agent-speaking flag off actual playback state.
-    const tick = () => {
-      if (myGen !== genRef.current) return;
-      const playing = playerRef.current?.isPlaying ?? false;
-      if (playing !== agentSpeakingRef.current) {
-        agentSpeakingRef.current = playing;
-        setIsAgentSpeaking(playing);
+      if (audioResult.status === "rejected") {
+        const e = audioResult.reason as Error;
+        fail(
+          e?.name === "NotAllowedError"
+            ? "Microphone permission denied"
+            : `Microphone error: ${e?.message ?? String(e)}`,
+        );
+        return;
       }
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-  }, [fail, handleServerEvent, startMic, teardown]);
+      if (tokenResult.status === "rejected" || !tokenResult.value?.token) {
+        fail(
+          tokenResult.status === "rejected"
+            ? ((tokenResult.reason as Error)?.message ?? "Could not get a voice token")
+            : "Could not get a voice token",
+        );
+        return;
+      }
+      voiceRef.current = tokenResult.value.voice ?? DEFAULT_VOICE;
+      openSocket(myGen, tokenResult.value);
+    } finally {
+      connectingRef.current = false;
+    }
+  }, [fail, openSocket, setupAudio, teardown]);
 
   const toggleMute = useCallback(() => {
     mutedRef.current = !mutedRef.current;
@@ -583,6 +919,14 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
     (text: string) => {
       const trimmed = text.trim();
       if (!trimmed || !wsRef.current) return;
+      // Typed input is a barge-in: cut any active response so the reply is
+      // generated with this message in context instead of colliding.
+      if (responseActiveRef.current || agentSpeakingRef.current) {
+        droppedItemRef.current = currentItemRef.current?.id ?? null;
+        pendingTruncateRef.current = null;
+        flushPlayback();
+        sendEvent({ type: "response.cancel" });
+      }
       sendEvent({
         type: "conversation.item.create",
         item: { type: "message", role: "user", content: [{ type: "input_text", text: trimmed }] },
@@ -590,7 +934,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
       sendEvent({ type: "response.create" });
       upsert(crypto.randomUUID(), { role: "user", text: trimmed, status: "completed" });
     },
-    [sendEvent, upsert],
+    [flushPlayback, sendEvent, upsert],
   );
 
   useEffect(() => () => disconnect(), [disconnect]);

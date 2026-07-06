@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Outlet } from "@tanstack/react-router";
-import { LogOut, Menu, Phone } from "lucide-react";
+import { LogOut, Menu, Phone, Users } from "lucide-react";
 
 import { PineMark } from "@/components/brand/PineMark";
 
@@ -10,7 +10,10 @@ import { cn } from "@/lib/utils";
 import { PRODUCT_NAME } from "@/lib/config";
 import { CallSessionProvider, useCallSession } from "@/lib/call-session";
 
-const NAV = [{ label: "Console", to: "/", icon: Phone }] as const;
+const NAV = [
+  { label: "Console", to: "/", icon: Phone },
+  { label: "Staff", to: "/staff", icon: Users },
+] as const;
 
 const iconBtn =
   "tap grid h-8 w-8 place-items-center rounded-lg text-muted-foreground transition-[color,background-color,transform] active:scale-[0.96] pf-hover:bg-accent pf-hover:text-foreground";

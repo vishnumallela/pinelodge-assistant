@@ -3,12 +3,14 @@ import { toast } from "sonner";
 
 import { useSession } from "@/lib/auth-client";
 import { fetchVoiceToken } from "@/lib/voice-token";
+import { useStaff } from "@/lib/staff";
 import { useVoiceAgent, type UseVoiceAgentReturn } from "@/hooks/useVoiceAgent";
 import {
   AGENT_NAME,
   buildInstructions,
   buildReceptionistTools,
   CALLER_PROMPTS,
+  GREETING,
 } from "@/lib/receptionist-agent";
 
 /**
@@ -47,12 +49,14 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     () => buildReceptionistTools({ onEndCall: () => setHangupRequested(true) }),
     [],
   );
-  const instructions = useMemo(() => buildInstructions(), []);
+  const staff = useStaff();
+  const instructions = useMemo(() => buildInstructions(staff), [staff]);
 
   const agent = useVoiceAgent({
     getToken: fetchVoiceToken,
     instructions,
     tools,
+    greeting: GREETING,
     onError: (m) => toast.error(m),
   });
 
@@ -80,15 +84,25 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 
   // Complete a requested hangup only after the assistant finishes speaking,
   // with a hard cap in case audio events go missing.
+  // Deps are the specific flags — depending on the agent object would restart
+  // these timers on every state/history change (the 15s cap would never fire).
   useEffect(() => {
     if (!hangupRequested) return;
-    if (agent.isAgentSpeaking || agent.isAgentThinking) return;
+    if (agent.isAgentSpeaking || agent.isAgentThinking || agent.isUserSpeaking) return;
     const grace = window.setTimeout(() => {
       setHangupRequested(false);
       agent.disconnect();
     }, 600);
     return () => window.clearTimeout(grace);
-  }, [hangupRequested, agent]);
+    // Specific flags on purpose; the whole agent object would reset the timer.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    hangupRequested,
+    agent.isAgentSpeaking,
+    agent.isAgentThinking,
+    agent.isUserSpeaking,
+    agent.disconnect,
+  ]);
 
   useEffect(() => {
     if (!hangupRequested) return;
@@ -97,7 +111,9 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       agent.disconnect();
     }, 15000);
     return () => window.clearTimeout(cap);
-  }, [hangupRequested, agent]);
+    // 15s hard cap must start exactly once per hangup — not restart on renders.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [hangupRequested, agent.disconnect]);
 
   const value = useMemo<CallSession>(
     () => ({
