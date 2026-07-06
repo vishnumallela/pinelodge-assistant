@@ -5,8 +5,9 @@ import { auth } from "./src/lib/auth";
 await initDb();
 
 /* ── single-admin identity ──
- * The one account is seeded on boot; sign-up endpoints are blocked below and
- * sign-in is restricted to the admin email. */
+ * The one account is seeded on boot and ADMIN_PASSWORD is authoritative: if
+ * the account already exists its password is reset to match. Sign-up
+ * endpoints are blocked below and sign-in is restricted to the admin email. */
 async function seedAdmin(): Promise<void> {
   try {
     await auth.api.signUpEmail({
@@ -18,9 +19,24 @@ async function seedAdmin(): Promise<void> {
       },
     });
     console.log(`[auth] seeded admin ${env.ADMIN_EMAIL}`);
+    return;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    if (!/already|exist/i.test(msg)) console.error("[auth] admin seed failed:", msg);
+    if (!/already|exist/i.test(msg)) {
+      console.error("[auth] admin seed failed:", msg);
+      return;
+    }
+  }
+  // Account exists: enforce the configured password.
+  try {
+    const ctx = await auth.$context;
+    const user = await ctx.internalAdapter.findUserByEmail(env.ADMIN_EMAIL);
+    if (!user) return;
+    const hash = await ctx.password.hash(env.ADMIN_PASSWORD);
+    await ctx.internalAdapter.updatePassword(user.user.id, hash);
+    console.log(`[auth] admin ${env.ADMIN_EMAIL} password enforced from env`);
+  } catch (e) {
+    console.error("[auth] admin password enforce failed:", e instanceof Error ? e.message : e);
   }
 }
 await seedAdmin();
