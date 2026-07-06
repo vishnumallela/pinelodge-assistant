@@ -17,7 +17,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
-import { getAgentPrompt, saveAgentPrompt } from "@/lib/staff-api";
+import { orpc } from "@/lib/orpc";
 import { AGENT_NAME } from "@/lib/receptionist-agent";
 
 const PLACEHOLDERS = ["{{greeting}}", "{{staff_directory}}", "{{unavailable}}", "{{fallback}}"];
@@ -32,12 +32,9 @@ export function PromptEditor({
   onOpenChange: (v: boolean) => void;
 }) {
   const qc = useQueryClient();
-  const { data } = useQuery({
-    queryKey: ["agent-prompt"],
-    queryFn: getAgentPrompt,
-    enabled: open,
-    refetchOnWindowFocus: false,
-  });
+  const { data } = useQuery(
+    orpc.prompt.get.queryOptions({ enabled: open, refetchOnWindowFocus: false }),
+  );
 
   const [template, setTemplate] = useState("");
   const [greeting, setGreeting] = useState("");
@@ -50,14 +47,15 @@ export function PromptEditor({
 
   const dirty = data !== undefined && (template !== data.template || greeting !== data.greeting);
 
-  const save = useMutation({
-    mutationFn: () => saveAgentPrompt(template, greeting),
-    onSuccess: (next) => {
-      qc.setQueryData(["agent-prompt"], next);
-      toast.success("Prompt saved. It applies to the next call.");
-    },
-    onError: (e) => toast.error(e.message),
-  });
+  const save = useMutation(
+    orpc.prompt.save.mutationOptions({
+      onSuccess: (next) => {
+        qc.setQueryData(orpc.prompt.get.key(), next);
+        toast.success("Prompt saved. It applies to the next call.");
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -126,7 +124,7 @@ export function PromptEditor({
           </Button>
           <Button
             disabled={!dirty || save.isPending || template.trim() === "" || greeting.trim() === ""}
-            onClick={() => save.mutate()}
+            onClick={() => save.mutate({ template, greeting })}
             className="bg-brand text-brand-foreground pf-hover:bg-brand/90"
           >
             {save.isPending ? "Saving…" : "Save"}

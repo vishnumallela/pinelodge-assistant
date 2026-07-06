@@ -1,16 +1,8 @@
-import { createCall, endCall, getCall, listCalls, logCallEvent, saveTranscript } from "./src/calls";
+import { RPCHandler } from "@orpc/server/fetch";
 import { ensureSchema } from "./src/db";
 import { env } from "./src/env";
-import { getAgentPrompt, saveTemplate, DEFAULT_GREETING, DEFAULT_TEMPLATE } from "./src/prompt";
-import { enqueueSummary, startSummaryWorker } from "./src/queue";
-import type { TranscriptTurn } from "./src/schema";
-import {
-  getSipSecret,
-  handleSipWebhook,
-  listRegisteredNumbers,
-  registerNumber,
-  sipEnabled,
-} from "./src/sip";
+import { startSummaryWorker } from "./src/queue";
+import { handleSipWebhook, sipEnabled } from "./src/sip";
 import {
   handleTwilioIncoming,
   handleTwilioResume,
@@ -18,14 +10,8 @@ import {
   twilioWebSocketHandlers,
   type TwilioSocketData,
 } from "./src/twilio";
-import {
-  createStaff,
-  deleteStaff,
-  listStaff,
-  readStaffInput,
-  seedDefaultStaff,
-  updateStaff,
-} from "./src/staff";
+import { seedDefaultStaff } from "./src/staff";
+import { router, type RpcContext } from "./src/router";
 
 await ensureSchema();
 await seedDefaultStaff();
@@ -111,97 +97,6 @@ async function mintVoiceToken(userId: string): Promise<Response> {
   return json({ token, model: env.GROK_REALTIME_MODEL, voice: env.GROK_REALTIME_VOICE });
 }
 
-/** Coerce an arbitrary body into a clean transcript array. */
-function readTranscript(body: unknown): TranscriptTurn[] {
-  const raw = (body as { transcript?: unknown } | null)?.transcript;
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((t) => {
-      const role = (t as { role?: unknown }).role;
-      const text = (t as { text?: unknown }).text;
-      return {
-        role: role === "assistant" ? ("assistant" as const) : ("caller" as const),
-        text: typeof text === "string" ? text : "",
-      };
-    })
-    .filter((t) => t.text.trim() !== "");
-}
-
-async function handleCalls(req: Request, path: string): Promise<Response> {
-  // rest is "", "/:id", "/:id/transcript", or "/:id/end"
-  const rest = path.slice("/api/calls".length);
-  const segments = rest.split("/").filter(Boolean);
-
-  // /api/calls
-  if (segments.length === 0) {
-    if (req.method === "GET") return json({ calls: await listCalls() });
-    if (req.method === "POST") {
-      const call = await createCall("console");
-      await logCallEvent(call.id, "call created", "console");
-      return json({ call }, 201);
-    }
-    return json({ error: "Method not allowed" }, 405);
-  }
-
-  const id = segments[0]!;
-  const sub = segments[1];
-
-  // /api/calls/:id
-  if (!sub) {
-    if (req.method === "GET") {
-      const call = await getCall(id);
-      return call ? json({ call }) : json({ error: "Call not found" }, 404);
-    }
-    return json({ error: "Method not allowed" }, 405);
-  }
-
-  const body = await req.json().catch(() => ({}));
-
-  // /api/calls/:id/transcript
-  if (sub === "transcript" && req.method === "PUT") {
-    const ok = await saveTranscript(id, readTranscript(body));
-    return ok ? json({ ok: true }) : json({ error: "Call is locked or not found" }, 409);
-  }
-
-  // /api/calls/:id/end
-  if (sub === "end" && req.method === "POST") {
-    const row = await endCall(id, readTranscript(body));
-    if (!row) return json({ error: "Call is locked or not found" }, 409);
-    await logCallEvent(id, "call ended", `console, ${row.durationSeconds ?? 0}s`);
-    await enqueueSummary({ callId: row.id });
-    return json({ call: row });
-  }
-
-  return json({ error: "Not found" }, 404);
-}
-
-async function handleStaff(req: Request, path: string): Promise<Response> {
-  const segments = path.slice("/api/staff".length).split("/").filter(Boolean);
-
-  if (segments.length === 0) {
-    if (req.method === "GET") return json({ staff: await listStaff() });
-    if (req.method === "POST") {
-      const input = readStaffInput(await req.json().catch(() => null));
-      if (!input) return json({ error: "Name and section are required." }, 400);
-      return json({ staff: await createStaff(input) }, 201);
-    }
-    return json({ error: "Method not allowed" }, 405);
-  }
-
-  const id = segments[0]!;
-  if (req.method === "PUT") {
-    const input = readStaffInput(await req.json().catch(() => null));
-    if (!input) return json({ error: "Name and section are required." }, 400);
-    const row = await updateStaff(id, input);
-    return row ? json({ staff: row }) : json({ error: "Staff member not found" }, 404);
-  }
-  if (req.method === "DELETE") {
-    const ok = await deleteStaff(id);
-    return ok ? json({ ok: true }) : json({ error: "Staff member not found" }, 404);
-  }
-  return json({ error: "Method not allowed" }, 405);
-}
-
 /** Public URL of this deployment, from proxy headers (Railway) or the request. */
 function publicUrl(req: Request): string {
   const url = new URL(req.url);
@@ -210,84 +105,7 @@ function publicUrl(req: Request): string {
   return `${proto}://${host}`;
 }
 
-async function handlePhoneConfig(req: Request): Promise<Response> {
-  if (req.method === "GET") {
-    const secret = await getSipSecret();
-    const origin = publicUrl(req);
-    return json({
-      twilio: {
-        enabled: twilioEnabled(),
-        hasApiKey: Boolean(env.XAI_API_KEY),
-        voiceWebhookUrl: `${origin}/api/twilio/incoming`,
-        streamUrl: `${origin.replace(/^http/, "ws")}/api/twilio/stream`,
-      },
-      sip: {
-        enabled: Boolean(secret && env.XAI_API_KEY),
-        hasApiKey: Boolean(env.XAI_API_KEY),
-        hasSecret: Boolean(secret),
-        secretSource: env.XAI_SIP_WEBHOOK_SECRET ? "env" : secret ? "registered" : null,
-        webhookUrl: `${origin}/api/sip/incoming`,
-        sipHost: "sip.voice.x.ai",
-        numbers: (await listRegisteredNumbers()) ?? [],
-      },
-    });
-  }
-  return json({ error: "Method not allowed" }, 405);
-}
-
-async function handleSipRegister(req: Request): Promise<Response> {
-  const body = (await req.json().catch(() => null)) as {
-    phoneNumber?: unknown;
-    name?: unknown;
-    authUsername?: unknown;
-    authPassword?: unknown;
-    allowedAddresses?: unknown;
-  } | null;
-  const phoneNumber = typeof body?.phoneNumber === "string" ? body.phoneNumber.trim() : "";
-  if (!/^\+[1-9]\d{6,14}$/.test(phoneNumber)) {
-    return json({ error: "Phone number must be E.164, e.g. +14155550100." }, 400);
-  }
-  const result = await registerNumber(
-    {
-      phoneNumber,
-      name: typeof body?.name === "string" && body.name.trim() ? body.name.trim() : "Front desk",
-      authUsername: typeof body?.authUsername === "string" ? body.authUsername.trim() : undefined,
-      authPassword: typeof body?.authPassword === "string" ? body.authPassword : undefined,
-      allowedAddresses: Array.isArray(body?.allowedAddresses)
-        ? body.allowedAddresses.filter((a): a is string => typeof a === "string" && a.trim() !== "")
-        : undefined,
-    },
-    `${publicUrl(req)}/api/sip/incoming`,
-  );
-  if ("error" in result) return json({ error: result.error }, result.status);
-  return json(result, 201);
-}
-
-async function handleAgentPrompt(req: Request): Promise<Response> {
-  if (req.method === "GET") {
-    const data = await getAgentPrompt();
-    return json({
-      ...data,
-      defaults: { template: DEFAULT_TEMPLATE, greeting: DEFAULT_GREETING },
-    });
-  }
-  if (req.method === "PUT") {
-    const body = (await req.json().catch(() => null)) as {
-      template?: unknown;
-      greeting?: unknown;
-    } | null;
-    const template = typeof body?.template === "string" ? body.template.trim() : "";
-    const greeting = typeof body?.greeting === "string" ? body.greeting.trim() : "";
-    if (!template || !greeting) return json({ error: "Template and greeting are required." }, 400);
-    await saveTemplate(template, greeting);
-    const data = await getAgentPrompt();
-    return json({
-      ...data,
-      defaults: { template: DEFAULT_TEMPLATE, greeting: DEFAULT_GREETING },
-    });
-  }
-  return json({ error: "Method not allowed" }, 405);
-}
+const rpc = new RPCHandler(router);
 
 const server = Bun.serve<TwilioSocketData>({
   hostname: "::",
@@ -325,22 +143,18 @@ const server = Bun.serve<TwilioSocketData>({
       res = await handleTwilioIncoming(req, publicUrl(req));
     } else if (path === "/api/twilio/resume" && req.method === "POST") {
       res = await handleTwilioResume(req, publicUrl(req));
+    } else if (path.startsWith("/orpc")) {
+      // Typed dashboard API; procedures enforce the admin check via context.
+      const user = await sessionUser(req);
+      const context: RpcContext = { admin: Boolean(user), origin: publicUrl(req) };
+      const { matched, response } = await rpc.handle(req, { prefix: "/orpc", context });
+      res = matched && response ? response : json({ error: "Not found" }, 404);
     } else {
       const user = await sessionUser(req);
       if (!user) {
         res = json({ error: "Sign in to continue." }, 401);
       } else if (path === "/api/realtime/token" && req.method === "POST") {
         res = await mintVoiceToken(user.id);
-      } else if (path === "/api/calls" || path.startsWith("/api/calls/")) {
-        res = await handleCalls(req, path);
-      } else if (path === "/api/staff" || path.startsWith("/api/staff/")) {
-        res = await handleStaff(req, path);
-      } else if (path === "/api/agent/prompt") {
-        res = await handleAgentPrompt(req);
-      } else if (path === "/api/phone/config") {
-        res = await handlePhoneConfig(req);
-      } else if (path === "/api/sip/register" && req.method === "POST") {
-        res = await handleSipRegister(req);
       } else {
         res = json({ error: "Not found" }, 404);
       }

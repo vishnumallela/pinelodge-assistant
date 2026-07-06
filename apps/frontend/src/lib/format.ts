@@ -11,8 +11,8 @@ function startOfDay(x: Date): number {
 }
 
 /** Ledger timestamp: "Today 2:14 PM", "Yesterday 9:03 AM", or "Jul 3, 2:14 PM". */
-export function formatWhen(iso: string): string {
-  const d = new Date(iso);
+export function formatWhen(iso: string | Date): string {
+  const d = iso instanceof Date ? iso : new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
   const days = Math.round((startOfDay(new Date()) - startOfDay(d)) / 86_400_000);

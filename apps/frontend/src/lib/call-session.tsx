@@ -5,13 +5,7 @@ import { toast } from "sonner";
 
 import { useSession } from "@/lib/auth-client";
 import { fetchVoiceToken } from "@/lib/voice-token";
-import { getAgentPrompt } from "@/lib/staff-api";
-import {
-  createCall,
-  endCall as endCallApi,
-  putTranscript,
-  type TranscriptTurn,
-} from "@/lib/calls-api";
+import { client, orpc, type TranscriptTurn } from "@/lib/orpc";
 import { useVoiceAgent, type UseVoiceAgentReturn } from "@/hooks/useVoiceAgent";
 import { AGENT_NAME, buildReceptionistTools, CALLER_PROMPTS } from "@/lib/receptionist-agent";
 
@@ -103,7 +97,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   useEffect(() => {
     const id = activeCallIdRef.current;
     if (!id || feed.length === 0) return;
-    void putTranscript(id, toTranscript(feed)).catch(() => {
+    void client.calls.saveTranscript({ id, transcript: toTranscript(feed) }).catch(() => {
       /* a later turn will retry the full transcript */
     });
   }, [feed]);
@@ -118,9 +112,9 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     if (id) {
       void (async () => {
         try {
-          await endCallApi(id, toTranscript(feedRef.current));
-          void qc.invalidateQueries({ queryKey: ["calls"] });
-          void qc.invalidateQueries({ queryKey: ["call", id] });
+          await client.calls.end({ id, transcript: toTranscript(feedRef.current) });
+          void qc.invalidateQueries({ queryKey: orpc.calls.list.key() });
+          void qc.invalidateQueries({ queryKey: orpc.calls.get.key({ input: { id } }) });
         } catch {
           /* the record still exists; the list refresh will show its state */
         } finally {
@@ -155,11 +149,11 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     if (activeCallIdRef.current) return;
     try {
       // The prompt renders fresh at connect time so availability is current.
-      const [call, agentPrompt] = await Promise.all([createCall(), getAgentPrompt()]);
+      const [call, agentPrompt] = await Promise.all([client.calls.create(), client.prompt.get()]);
       finalizingRef.current = false;
       setActiveCallId(call.id);
       setHangupRequested(false);
-      void qc.invalidateQueries({ queryKey: ["calls"] });
+      void qc.invalidateQueries({ queryKey: orpc.calls.list.key() });
       await navigate({ to: "/calls/$callId", params: { callId: call.id } });
       await agent.connect({ instructions: agentPrompt.prompt, greeting: agentPrompt.greeting });
     } catch (e) {

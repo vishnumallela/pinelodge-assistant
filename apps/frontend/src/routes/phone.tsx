@@ -17,7 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { getPhoneConfig, registerSipNumber, type PhoneConfig } from "@/lib/sip-api";
+import { orpc, type PhoneConfig } from "@/lib/orpc";
 import { AGENT_NAME } from "@/lib/receptionist-agent";
 import { cn } from "@/lib/utils";
 
@@ -59,7 +59,7 @@ function Step({ n, children }: { n: number; children: React.ReactNode }) {
 }
 
 export function PhonePage() {
-  const { data: config } = useQuery({ queryKey: ["phone-config"], queryFn: getPhoneConfig });
+  const { data: config } = useQuery(orpc.phone.config.queryOptions());
 
   return (
     <main className="min-h-0 flex-1 overflow-y-auto scrollbar-subtle">
@@ -143,7 +143,7 @@ function SipSection({ config }: { config: PhoneConfig | undefined }) {
 
   const register = useMutation({
     mutationFn: () =>
-      registerSipNumber({
+      orpc.phone.registerSip.call({
         phoneNumber: form.phoneNumber.trim(),
         name: form.name.trim() || "Front desk",
         ...(form.authMethod === "credentials"
@@ -157,7 +157,7 @@ function SipSection({ config }: { config: PhoneConfig | undefined }) {
       }),
     onSuccess: ({ secret }) => {
       setRevealedSecret(secret || null);
-      void qc.invalidateQueries({ queryKey: ["phone-config"] });
+      void qc.invalidateQueries({ queryKey: orpc.phone.config.key() });
       toast.success("Number registered with xAI.");
     },
     onError: (e) => toast.error(e.message),

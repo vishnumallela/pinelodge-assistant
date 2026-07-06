@@ -1,5 +1,6 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "./db";
+import { ship } from "./observability";
 import { calls, type CallRow, type CallSummary, type TranscriptTurn } from "./schema";
 
 /**
@@ -13,8 +14,25 @@ export async function createCall(source: string): Promise<CallRow> {
   return row!;
 }
 
-export async function listCalls(): Promise<CallRow[]> {
+export function listCalls(): Promise<CallRow[]> {
   return db.select().from(calls).orderBy(desc(calls.createdAt));
+}
+
+/** Newest-first page of the log plus the total, for server-side pagination. */
+export async function listCallsPage(
+  page: number,
+  pageSize: number,
+): Promise<{ calls: CallRow[]; total: number }> {
+  const [rows, [count]] = await Promise.all([
+    db
+      .select()
+      .from(calls)
+      .orderBy(desc(calls.createdAt))
+      .limit(pageSize)
+      .offset((page - 1) * pageSize),
+    db.select({ total: sql<number>`count(*)::int` }).from(calls),
+  ]);
+  return { calls: rows, total: count?.total ?? 0 };
 }
 
 export async function getCall(id: string): Promise<CallRow | null> {
@@ -27,6 +45,7 @@ export async function getCall(id: string): Promise<CallRow | null> {
  *  service log. */
 export async function logCallEvent(id: string, event: string, detail?: string): Promise<void> {
   console.log(`[call ${id.slice(0, 8)}] ${event}${detail ? `: ${detail}` : ""}`);
+  ship("call_events", { call_id: id, event, detail: detail ?? "" });
   const entry = { at: new Date().toISOString(), event, ...(detail ? { detail } : {}) };
   try {
     await db

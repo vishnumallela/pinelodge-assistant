@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import type { CallStatus } from "@/lib/calls-api";
+import type { CallStatus } from "@/lib/orpc";
 
 /**
  * The status stamp on a call slip. Brass = live, sage = summarized, muted =

@@ -6,7 +6,7 @@ import { ConsoleView } from "@/components/voice/ConsoleView";
 import { StatusStamp } from "@/components/calls/StatusStamp";
 import { Spinner } from "@/components/ui/spinner";
 import { useCallSession } from "@/lib/call-session";
-import { callSource, getCall, type Call } from "@/lib/calls-api";
+import { callSource, orpc, type Call } from "@/lib/orpc";
 import { formatDuration, formatWhen } from "@/lib/format";
 import { AGENT_NAME } from "@/lib/receptionist-agent";
 
@@ -21,11 +21,12 @@ export function CallPage() {
 }
 
 function LockedCall({ callId }: { callId: string }) {
-  const { data: call, isLoading } = useQuery({
-    queryKey: ["call", callId],
-    queryFn: () => getCall(callId),
-    refetchInterval: (q) => (q.state.data?.status === "summarizing" ? 2500 : false),
-  });
+  const { data: call, isLoading } = useQuery(
+    orpc.calls.get.queryOptions({
+      input: { id: callId },
+      refetchInterval: (q) => (q.state.data?.status === "summarizing" ? 2500 : false),
+    }),
+  );
 
   return (
     <main className="min-h-0 flex-1 overflow-y-auto scrollbar-subtle">

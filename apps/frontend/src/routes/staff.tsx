@@ -34,14 +34,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  createStaff,
-  deleteStaff,
-  listStaff,
-  updateStaff,
-  type StaffInput,
-  type StaffMember,
-} from "@/lib/staff-api";
+import { orpc, type StaffInput, type StaffMember } from "@/lib/orpc";
 import { AGENT_NAME } from "@/lib/receptionist-agent";
 import { cn } from "@/lib/utils";
 
@@ -174,28 +167,27 @@ const EMPTY_FORM: StaffInput = {
 
 export function StaffPage() {
   const qc = useQueryClient();
-  const { data: staff, isLoading } = useQuery({
-    queryKey: ["staff"],
-    queryFn: listStaff,
-    refetchOnWindowFocus: true,
-  });
+  const { data: staff, isLoading } = useQuery(
+    orpc.staff.list.queryOptions({ refetchOnWindowFocus: true }),
+  );
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<StaffMember | null>(null);
 
   const invalidate = () => {
-    void qc.invalidateQueries({ queryKey: ["staff"] });
-    void qc.invalidateQueries({ queryKey: ["agent-prompt"] });
+    void qc.invalidateQueries({ queryKey: orpc.staff.list.key() });
+    void qc.invalidateQueries({ queryKey: orpc.prompt.get.key() });
   };
 
-  const remove = useMutation({
-    mutationFn: deleteStaff,
-    onSuccess: () => {
-      invalidate();
-      toast.success("Staff member removed.");
-    },
-    onError: (e) => toast.error(e.message),
-  });
+  const remove = useMutation(
+    orpc.staff.remove.mutationOptions({
+      onSuccess: () => {
+        invalidate();
+        toast.success("Staff member removed.");
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
 
   const openCreate = () => {
     setEditing(null);
@@ -214,7 +206,7 @@ export function StaffPage() {
           toast.error("Assign another fallback before removing this person.");
           return;
         }
-        remove.mutate(row.id);
+        remove.mutate({ id: row.id });
       },
     }),
     // openEdit/remove are stable enough for the table's lifetime here.
@@ -231,7 +223,7 @@ export function StaffPage() {
 
   return (
     <main className="min-h-0 flex-1 overflow-y-auto scrollbar-subtle">
-      <div className="mx-auto w-full max-w-4xl px-5 py-10 md:px-6">
+      <div className="w-full px-5 py-10 md:px-8">
         <header className="flex items-end justify-between gap-4">
           <div className="space-y-1">
             <h1 className="font-display text-[34px] leading-none text-foreground">Staff</h1>
@@ -344,7 +336,10 @@ function StaffEditor({
   const timeOffDates = form.timeOff.map((d) => new Date(`${d}T12:00:00`));
 
   const save = useMutation({
-    mutationFn: () => (editing ? updateStaff(editing.id, form) : createStaff(form)),
+    mutationFn: () =>
+      editing
+        ? orpc.staff.update.call({ id: editing.id, data: form })
+        : orpc.staff.create.call(form),
     onSuccess: () => {
       onSaved();
       onOpenChange(false);

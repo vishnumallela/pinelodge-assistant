@@ -51,6 +51,13 @@ const schema = z.object({
   // POST /api/twilio/incoming + the media-stream WebSocket, and validates
   // X-Twilio-Signature on the webhook. Works without xAI's gated agents API.
   TWILIO_AUTH_TOKEN: z.string().optional(),
+
+  // Observability sink (optional): OpenObserve-compatible JSON ingest. Call
+  // events and errors ship here when all three are set.
+  OBSERVE_URL: z.string().url().optional(),
+  OBSERVE_ORG: z.string().default("default"),
+  OBSERVE_USER: z.string().optional(),
+  OBSERVE_PASSWORD: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -76,4 +83,8 @@ export const env = {
   FACILITY_TIMEZONE: raw.FACILITY_TIMEZONE,
   XAI_SIP_WEBHOOK_SECRET: raw.XAI_SIP_WEBHOOK_SECRET,
   TWILIO_AUTH_TOKEN: raw.TWILIO_AUTH_TOKEN,
+  OBSERVE_URL: raw.OBSERVE_URL?.replace(/\/$/, ""),
+  OBSERVE_ORG: raw.OBSERVE_ORG,
+  OBSERVE_USER: raw.OBSERVE_USER,
+  OBSERVE_PASSWORD: raw.OBSERVE_PASSWORD,
 } as const;
