@@ -19,6 +19,18 @@ export interface SipConfig {
   numbers: RegisteredNumber[];
 }
 
+export interface TwilioConfig {
+  enabled: boolean;
+  hasApiKey: boolean;
+  voiceWebhookUrl: string;
+  streamUrl: string;
+}
+
+export interface PhoneConfig {
+  twilio: TwilioConfig;
+  sip: SipConfig;
+}
+
 export interface RegisterNumberBody {
   phoneNumber: string;
   name: string;
@@ -42,8 +54,8 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-export function getSipConfig(): Promise<SipConfig> {
-  return api<SipConfig>("/api/sip/config");
+export function getPhoneConfig(): Promise<PhoneConfig> {
+  return api<PhoneConfig>("/api/phone/config");
 }
 
 export function registerSipNumber(

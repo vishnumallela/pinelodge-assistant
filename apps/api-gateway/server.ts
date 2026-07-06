@@ -12,6 +12,12 @@ import {
   sipEnabled,
 } from "./src/sip";
 import {
+  handleTwilioIncoming,
+  twilioEnabled,
+  twilioWebSocketHandlers,
+  type TwilioSocketData,
+} from "./src/twilio";
+import {
   createStaff,
   deleteStaff,
   listStaff,
@@ -195,17 +201,26 @@ function publicUrl(req: Request): string {
   return `${proto}://${host}`;
 }
 
-async function handleSipConfig(req: Request): Promise<Response> {
+async function handlePhoneConfig(req: Request): Promise<Response> {
   if (req.method === "GET") {
     const secret = await getSipSecret();
+    const origin = publicUrl(req);
     return json({
-      enabled: Boolean(secret && env.XAI_API_KEY),
-      hasApiKey: Boolean(env.XAI_API_KEY),
-      hasSecret: Boolean(secret),
-      secretSource: env.XAI_SIP_WEBHOOK_SECRET ? "env" : secret ? "registered" : null,
-      webhookUrl: `${publicUrl(req)}/api/sip/incoming`,
-      sipHost: "sip.voice.x.ai",
-      numbers: (await listRegisteredNumbers()) ?? [],
+      twilio: {
+        enabled: twilioEnabled(),
+        hasApiKey: Boolean(env.XAI_API_KEY),
+        voiceWebhookUrl: `${origin}/api/twilio/incoming`,
+        streamUrl: `${origin.replace(/^http/, "ws")}/api/twilio/stream`,
+      },
+      sip: {
+        enabled: Boolean(secret && env.XAI_API_KEY),
+        hasApiKey: Boolean(env.XAI_API_KEY),
+        hasSecret: Boolean(secret),
+        secretSource: env.XAI_SIP_WEBHOOK_SECRET ? "env" : secret ? "registered" : null,
+        webhookUrl: `${origin}/api/sip/incoming`,
+        sipHost: "sip.voice.x.ai",
+        numbers: (await listRegisteredNumbers()) ?? [],
+      },
     });
   }
   return json({ error: "Method not allowed" }, 405);
@@ -265,23 +280,40 @@ async function handleAgentPrompt(req: Request): Promise<Response> {
   return json({ error: "Method not allowed" }, 405);
 }
 
-const server = Bun.serve({
+const server = Bun.serve<TwilioSocketData>({
   hostname: "::",
   port: env.PORT,
   idleTimeout: 120,
-  async fetch(req) {
+  websocket: twilioWebSocketHandlers,
+  async fetch(req, srv) {
     const origin = req.headers.get("origin");
     if (req.method === "OPTIONS")
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
 
     const path = new URL(req.url).pathname;
+
+    // Twilio media stream: upgrade before any session/CORS handling.
+    if (path === "/api/twilio/stream") {
+      if (!twilioEnabled()) return json({ error: "Twilio bridge is not configured." }, 503);
+      if (srv.upgrade(req, { data: { bridge: null } })) return undefined as unknown as Response;
+      return json({ error: "Expected a WebSocket upgrade." }, 400);
+    }
+
     let res: Response;
 
     if (path === "/health") {
-      res = json({ ok: true, service: "api-gateway", sip: await sipEnabled() });
+      res = json({
+        ok: true,
+        service: "api-gateway",
+        sip: await sipEnabled(),
+        twilio: twilioEnabled(),
+      });
     } else if (path === "/api/sip/incoming" && req.method === "POST") {
       // Authenticated by webhook signature, not by a browser session.
       res = await handleSipWebhook(req);
+    } else if (path === "/api/twilio/incoming" && req.method === "POST") {
+      // Authenticated by X-Twilio-Signature, not by a browser session.
+      res = await handleTwilioIncoming(req, publicUrl(req));
     } else {
       const user = await sessionUser(req);
       if (!user) {
@@ -294,8 +326,8 @@ const server = Bun.serve({
         res = await handleStaff(req, path);
       } else if (path === "/api/agent/prompt") {
         res = await handleAgentPrompt(req);
-      } else if (path === "/api/sip/config") {
-        res = await handleSipConfig(req);
+      } else if (path === "/api/phone/config") {
+        res = await handlePhoneConfig(req);
       } else if (path === "/api/sip/register" && req.method === "POST") {
         res = await handleSipRegister(req);
       } else {

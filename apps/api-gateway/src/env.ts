@@ -43,6 +43,11 @@ const schema = z.object({
   // registration to enable POST /api/sip/incoming. The realtime WS for SIP
   // calls authenticates with XAI_API_KEY (ephemeral secrets are not allowed).
   XAI_SIP_WEBHOOK_SECRET: z.string().optional(),
+
+  // Twilio bridge (optional): the account's auth token enables
+  // POST /api/twilio/incoming + the media-stream WebSocket, and validates
+  // X-Twilio-Signature on the webhook. Works without xAI's gated agents API.
+  TWILIO_AUTH_TOKEN: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -66,4 +71,5 @@ export const env = {
   FACILITY_NAME: raw.FACILITY_NAME,
   FACILITY_TIMEZONE: raw.FACILITY_TIMEZONE,
   XAI_SIP_WEBHOOK_SECRET: raw.XAI_SIP_WEBHOOK_SECRET,
+  TWILIO_AUTH_TOKEN: raw.TWILIO_AUTH_TOKEN,
 } as const;
