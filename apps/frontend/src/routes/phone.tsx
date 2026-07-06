@@ -17,7 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { getPhoneConfig, registerSipNumber } from "@/lib/sip-api";
+import { getPhoneConfig, registerSipNumber, type PhoneConfig } from "@/lib/sip-api";
 import { AGENT_NAME } from "@/lib/receptionist-agent";
 import { cn } from "@/lib/utils";
 
@@ -67,8 +67,7 @@ export function PhonePage() {
         <header className="space-y-1">
           <h1 className="font-display text-[34px] leading-none text-foreground">Phone line</h1>
           <p className="text-[14px] text-muted-foreground">
-            Put {AGENT_NAME} on a real phone number. The Twilio bridge works today; xAI Direct SIP
-            unlocks once your team has Agents beta access.
+            Put {AGENT_NAME} on a real phone number.
           </p>
         </header>
 
@@ -86,20 +85,14 @@ export function PhonePage() {
   );
 }
 
-/* ── Twilio bridge (the working path) ─────────────────────────────────── */
-
-function TwilioSection({
-  config,
-}: {
-  config: Awaited<ReturnType<typeof getPhoneConfig>> | undefined;
-}) {
+function TwilioSection({ config }: { config: PhoneConfig | undefined }) {
   const t = config?.twilio;
   return (
     <section className="rounded-2xl border border-brand/25 bg-card p-6 shadow-[0_1px_2px_rgba(154,106,47,0.08)]">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <PhoneCall className="size-4 text-brand" />
-          <h2 className="text-[15px] font-medium text-foreground">Twilio bridge</h2>
+          <h2 className="text-[15px] font-medium text-foreground">Twilio</h2>
           <Badge variant="brand">Recommended</Badge>
         </div>
         {t?.enabled ? (
@@ -109,45 +102,32 @@ function TwilioSection({
         )}
       </div>
       <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
-        A Twilio number streams call audio here, and this service bridges it into the same
-        {` ${AGENT_NAME} `}session the console uses — live prompt, staff availability, call log, and
-        summaries included. No xAI beta access required.
+        A Twilio number streams call audio into the same session the console uses, with the live
+        prompt, call log, and summaries.
       </p>
 
-      <div className="mt-5 grid gap-4 sm:grid-cols-2">
-        <CopyField label="Voice webhook (A call comes in)" value={t?.voiceWebhookUrl ?? "…"} />
-        <CopyField label="Media stream endpoint (set automatically)" value={t?.streamUrl ?? "…"} />
+      <div className="mt-5">
+        <CopyField label="Voice webhook" value={t?.voiceWebhookUrl ?? "Loading"} />
       </div>
 
       <ol className="mt-6 space-y-3">
-        <Step n={1}>
-          In the Twilio Console, buy a phone number (or pick an existing one) under Phone Numbers.
-        </Step>
+        <Step n={1}>Buy a voice number in the Twilio Console.</Step>
         <Step n={2}>
-          Copy your account&rsquo;s <strong>Auth Token</strong> from the Twilio dashboard and set it
-          as{" "}
+          Set your Twilio Auth Token as{" "}
           <code className="rounded bg-secondary px-1.5 py-0.5 text-[12px]">TWILIO_AUTH_TOKEN</code>{" "}
-          on the api-gateway, then redeploy.
+          on the api-gateway.
         </Step>
         <Step n={3}>
-          On the number&rsquo;s Voice configuration, set <em>A call comes in</em> to{" "}
-          <strong>Webhook</strong> with the URL above, method <strong>HTTP POST</strong>.
+          Point the number at the voice webhook above: Voice Configuration, A call comes in,
+          Webhook, HTTP POST.
         </Step>
-        <Step n={4}>
-          Call the number — the call shows up live in the call log and is written up when it ends.
-        </Step>
+        <Step n={4}>Call the number. The call appears live in the call log.</Step>
       </ol>
     </section>
   );
 }
 
-/* ── xAI Direct SIP (gated behind Agents beta) ────────────────────────── */
-
-function SipSection({
-  config,
-}: {
-  config: Awaited<ReturnType<typeof getPhoneConfig>> | undefined;
-}) {
+function SipSection({ config }: { config: PhoneConfig | undefined }) {
   const qc = useQueryClient();
   const sip = config?.sip;
 
@@ -204,13 +184,12 @@ function SipSection({
         )}
       </div>
       <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
-        Point any carrier straight at xAI — no Twilio in the path. Registration needs the xAI Agents
-        API enabled for your team (currently in beta); if it returns a 403, request access from xAI
-        and retry here. Nothing else changes.
+        Point any carrier straight at xAI, no Twilio in the path. Registration needs the xAI Agents
+        API enabled for your team. If it returns a 403, request access from xAI and retry here.
       </p>
 
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
-        <CopyField label="Incoming-call webhook" value={sip?.webhookUrl ?? "…"} />
+        <CopyField label="Incoming-call webhook" value={sip?.webhookUrl ?? "Loading"} />
         <CopyField
           label="SIP destination for carriers"
           value={`sip:{number}@${sip?.sipHost ?? "sip.voice.x.ai"};transport=tls`}
@@ -338,18 +317,16 @@ function SipSection({
           disabled={!valid || register.isPending || !sip?.hasApiKey}
           onClick={() => register.mutate()}
         >
-          {register.isPending ? "Registering…" : "Register with xAI"}
+          {register.isPending ? "Registering" : "Register with xAI"}
         </Button>
       </div>
 
       {revealedSecret && (
         <div className="mt-5 rounded-xl border border-brand/30 bg-brand-soft/50 p-4">
-          <p className="text-[13px] font-medium text-foreground">
-            Webhook signing secret — shown once
-          </p>
+          <p className="text-[13px] font-medium text-foreground">Webhook signing secret</p>
           <p className="mt-0.5 text-[12.5px] text-muted-foreground">
-            Already stored on the server. Copy it if you also want it in XAI_SIP_WEBHOOK_SECRET for
-            other environments.
+            Shown once and already stored on the server. Copy it if you want it in
+            XAI_SIP_WEBHOOK_SECRET for other environments.
           </p>
           <div className="mt-2">
             <CopyField label="Signing secret" value={revealedSecret} />
