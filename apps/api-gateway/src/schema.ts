@@ -17,12 +17,21 @@ export interface CallSummary {
 
 export type CallStatus = "active" | "summarizing" | "done" | "failed";
 
+/** One system event on a call's debug timeline (webhook, transfer, …). */
+export interface CallEvent {
+  at: string;
+  event: string;
+  detail?: string;
+}
+
 export const calls = pgTable("calls", {
   id: uuid("id").primaryKey().defaultRandom(),
+  /** Call source: "console", "phone:+1…", or "sip:+1…". */
   userId: text("user_id").notNull(),
   status: text("status").$type<CallStatus>().notNull().default("active"),
   transcript: jsonb("transcript").$type<TranscriptTurn[]>().notNull().default([]),
   summary: jsonb("summary").$type<CallSummary | null>(),
+  events: jsonb("events").$type<CallEvent[]>().notNull().default([]),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   endedAt: timestamp("ended_at", { withTimezone: true }),
   durationSeconds: integer("duration_seconds"),

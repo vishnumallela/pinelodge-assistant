@@ -17,16 +17,31 @@ export interface CallSummary {
   followUp: string;
 }
 
+export interface CallEvent {
+  at: string;
+  event: string;
+  detail?: string;
+}
+
 export interface Call {
   id: string;
+  /** Call source: "console", "phone:+1…", or "sip:+1…". */
   userId: string;
   status: CallStatus;
   transcript: TranscriptTurn[];
   summary: CallSummary | null;
+  events: CallEvent[];
   startedAt: string;
   endedAt: string | null;
   durationSeconds: number | null;
   createdAt: string;
+}
+
+/** Human label for where the call came from. */
+export function callSource(call: Call): string {
+  if (call.userId.startsWith("phone:")) return call.userId.slice("phone:".length);
+  if (call.userId.startsWith("sip:")) return call.userId.slice("sip:".length);
+  return "Console";
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {

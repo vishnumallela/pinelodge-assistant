@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { endCall as lockCall, saveTranscript } from "./calls";
+import { endCall as lockCall, logCallEvent, saveTranscript } from "./calls";
 import { db } from "./db";
 import { env } from "./env";
 import { getAgentPrompt, PHONE_TRANSFER_APPENDIX } from "./prompt";
@@ -207,6 +207,7 @@ export async function handleSipWebhook(req: Request): Promise<Response> {
 /** Resolve a spoken name and REFER the SIP leg to their phone. */
 async function handleSipTransfer(
   sipCallId: string,
+  rowId: string,
   toolCallId: string,
   argsRaw: string,
   transcript: TranscriptTurn[],
@@ -220,6 +221,7 @@ async function handleSipTransfer(
   }
   const target = name ? await findTransferTarget(name) : null;
   if (!target) {
+    void logCallEvent(rowId, "transfer failed", `asked for "${name}", nobody reachable`);
     send({
       type: "conversation.item.create",
       item: {
@@ -243,6 +245,7 @@ async function handleSipTransfer(
       output: JSON.stringify({ ok: true, connecting: target.name }),
     },
   });
+  void logCallEvent(rowId, "transfer via REFER", `${target.name} at ${target.phone}`);
   // xAI SIP call control: REFER the call leg to the target number.
   try {
     await fetch(`https://api.x.ai/v1/realtime/calls/${sipCallId}/refer`, {
@@ -258,17 +261,23 @@ async function handleSipTransfer(
 
 /** Drive one inbound SIP call end-to-end over the realtime WebSocket. */
 async function runSipAgent(callId: string, from: string): Promise<void> {
-  const userId = `${SIP_USER_PREFIX}:${from}`;
-  const [row] = await db.insert(calls).values({ userId }).returning();
+  const [row] = await db
+    .insert(calls)
+    .values({ userId: `${SIP_USER_PREFIX}:${from}` })
+    .returning();
   const rowId = row!.id;
+  await logCallEvent(rowId, "call created", `sip webhook from ${from}`);
 
   const { prompt, greeting } = await getAgentPrompt();
   const transcript: TranscriptTurn[] = [];
   let hangupRequested = false;
 
   const finalize = async () => {
-    const locked = await lockCall(userId, rowId, transcript);
-    if (locked) await enqueueSummary({ callId: rowId, userId });
+    const locked = await lockCall(rowId, transcript);
+    if (locked) {
+      await logCallEvent(rowId, "call ended", `sip leg closed, ${locked.durationSeconds ?? 0}s`);
+      await enqueueSummary({ callId: rowId });
+    }
   };
 
   const hangup = async () => {
@@ -292,7 +301,7 @@ async function runSipAgent(callId: string, from: string): Promise<void> {
     const send = (e: Record<string, unknown>) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(e));
     };
-    const persist = () => void saveTranscript(userId, rowId, transcript).catch(() => {});
+    const persist = () => void saveTranscript(rowId, transcript).catch(() => {});
 
     // Safety net: a stuck call ends after 10 minutes.
     const cap = setTimeout(() => void hangup(), 10 * 60 * 1000);
@@ -391,6 +400,7 @@ async function runSipAgent(callId: string, from: string): Promise<void> {
           } else if (ev.name === "transfer_call") {
             void handleSipTransfer(
               callId,
+              rowId,
               String(ev.call_id ?? ""),
               String(ev.arguments ?? ""),
               transcript,

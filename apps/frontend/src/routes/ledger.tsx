@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useCallSession } from "@/lib/call-session";
-import { listCalls, type Call } from "@/lib/calls-api";
+import { callSource, listCalls, type Call } from "@/lib/calls-api";
 import { formatDuration, formatWhen } from "@/lib/format";
 import { FACILITY_NAME } from "@/lib/config";
 
@@ -47,6 +47,15 @@ const columns = [
     cell: (info) => (
       <span className="whitespace-nowrap text-[12.5px] tabular-nums text-muted-foreground">
         {formatWhen(info.getValue())}
+      </span>
+    ),
+  }),
+  helper.display({
+    id: "from",
+    header: "From",
+    cell: ({ row }) => (
+      <span className="whitespace-nowrap text-[12.5px] tabular-nums text-muted-foreground">
+        {callSource(row.original)}
       </span>
     ),
   }),

@@ -33,10 +33,12 @@ export const DEFAULT_TEMPLATE = [
 /** Appended to the rendered prompt on real phone calls, where the redirect
  *  is an actual transfer instead of an announcement. */
 export const PHONE_TRANSFER_APPENDIX = [
-  "This caller is on a real phone line and you can actually connect them.",
-  'After you announce the redirect and say goodbye, call transfer_call with the person\'s exact name from the directory (e.g. {"name": "Mira"}) instead of end_call, and say nothing more.',
-  "If transfer_call returns an error, apologize, say the front office will call them back shortly, then say goodbye and call end_call.",
-].join(" ");
+  "This caller is on a real phone line and you can actually connect them. Transfers follow this exact order, never any other:",
+  '1. FIRST say the redirect line out loud, naming the person and section, e.g. "I\'m redirecting you to Mira in Billing now. Thanks for calling, goodbye!"',
+  '2. ONLY AFTER saying that line, call transfer_call with the person\'s exact name from the directory, e.g. {"name": "Mira"}. Never call transfer_call before you have said the redirect line. Say nothing after calling it.',
+  "3. If transfer_call returns an error, apologize, say the front office will call them back shortly, then say goodbye and call end_call.",
+  "Use end_call only when there is nothing to transfer (wrong number, caller done, silence).",
+].join("\n");
 
 async function getSetting<T>(key: string, fallback: T): Promise<T> {
   const [row] = await db.select().from(settings).where(eq(settings.key, key)).limit(1);

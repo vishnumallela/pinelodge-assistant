@@ -1,36 +1,50 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "./db";
 import { calls, type CallRow, type CallSummary, type TranscriptTurn } from "./schema";
 
-export async function createCall(userId: string): Promise<CallRow> {
-  const [row] = await db.insert(calls).values({ userId }).returning();
+/**
+ * Single-admin data layer: every call (console, Twilio, SIP) belongs to the
+ * one dashboard, so queries are id-scoped only. The userId column records the
+ * call's source ("console" or the caller's line) for display.
+ */
+
+export async function createCall(source: string): Promise<CallRow> {
+  const [row] = await db.insert(calls).values({ userId: source }).returning();
   return row!;
 }
 
-export function listCalls(userId: string): Promise<CallRow[]> {
-  return db.select().from(calls).where(eq(calls.userId, userId)).orderBy(desc(calls.createdAt));
+export async function listCalls(): Promise<CallRow[]> {
+  return db.select().from(calls).orderBy(desc(calls.createdAt));
 }
 
-export async function getCall(userId: string, id: string): Promise<CallRow | null> {
-  const [row] = await db
-    .select()
-    .from(calls)
-    .where(and(eq(calls.id, id), eq(calls.userId, userId)))
-    .limit(1);
+export async function getCall(id: string): Promise<CallRow | null> {
+  const [row] = await db.select().from(calls).where(eq(calls.id, id)).limit(1);
   return row ?? null;
+}
+
+/** Append a system event to the call's debug timeline (works on locked calls
+ *  too — events are telemetry, not conversation data) and mirror it to the
+ *  service log. */
+export async function logCallEvent(id: string, event: string, detail?: string): Promise<void> {
+  console.log(`[call ${id.slice(0, 8)}] ${event}${detail ? `: ${detail}` : ""}`);
+  const entry = { at: new Date().toISOString(), event, ...(detail ? { detail } : {}) };
+  try {
+    await db
+      .update(calls)
+      .set({ events: sql`${calls.events} || ${JSON.stringify([entry])}::jsonb` })
+      .where(eq(calls.id, id));
+  } catch (e) {
+    console.error(`[call ${id.slice(0, 8)}] event write failed:`, e);
+  }
 }
 
 /** Persist the running transcript. Only an active call accepts writes — an
  *  ended call is locked. Returns false when the call is missing or locked. */
-export async function saveTranscript(
-  userId: string,
-  id: string,
-  transcript: TranscriptTurn[],
-): Promise<boolean> {
+export async function saveTranscript(id: string, transcript: TranscriptTurn[]): Promise<boolean> {
   const res = await db
     .update(calls)
     .set({ transcript })
-    .where(and(eq(calls.id, id), eq(calls.userId, userId), eq(calls.status, "active")))
+    .where(and(eq(calls.id, id), eq(calls.status, "active")))
     .returning({ id: calls.id });
   return res.length > 0;
 }
@@ -39,11 +53,10 @@ export async function saveTranscript(
  *  call transitions, so a double end is a no-op. Returns the locked row (with
  *  the final transcript applied) or null if it was missing / already ended. */
 export async function endCall(
-  userId: string,
   id: string,
   transcript: TranscriptTurn[] | undefined,
 ): Promise<CallRow | null> {
-  const existing = await getCall(userId, id);
+  const existing = await getCall(id);
   if (!existing || existing.status !== "active") return null;
   const endedAt = new Date();
   const durationSeconds = Math.max(
@@ -60,7 +73,7 @@ export async function endCall(
       // one streamed during the call (an empty array must not wipe it).
       ...(transcript && transcript.length > 0 ? { transcript } : {}),
     })
-    .where(and(eq(calls.id, id), eq(calls.userId, userId), eq(calls.status, "active")))
+    .where(and(eq(calls.id, id), eq(calls.status, "active")))
     .returning();
   return row ?? null;
 }

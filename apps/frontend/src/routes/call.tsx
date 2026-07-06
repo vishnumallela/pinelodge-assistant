@@ -6,7 +6,7 @@ import { ConsoleView } from "@/components/voice/ConsoleView";
 import { StatusStamp } from "@/components/calls/StatusStamp";
 import { Spinner } from "@/components/ui/spinner";
 import { useCallSession } from "@/lib/call-session";
-import { getCall, type Call } from "@/lib/calls-api";
+import { callSource, getCall, type Call } from "@/lib/calls-api";
 import { formatDuration, formatWhen } from "@/lib/format";
 import { AGENT_NAME } from "@/lib/receptionist-agent";
 
@@ -47,7 +47,8 @@ function LockedCall({ callId }: { callId: string }) {
                   {formatWhen(call.startedAt)}
                 </h1>
                 <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
-                  <Lock className="size-3" /> Locked · {formatDuration(call.durationSeconds)}
+                  <Lock className="size-3" /> Locked · {callSource(call)} ·{" "}
+                  {formatDuration(call.durationSeconds)}
                 </p>
               </div>
               <StatusStamp status={call.status} />
@@ -55,6 +56,7 @@ function LockedCall({ callId }: { callId: string }) {
 
             <SummaryCard call={call} />
             <Transcript call={call} />
+            <EventTimeline call={call} />
           </>
         )}
       </div>
@@ -138,6 +140,37 @@ function Transcript({ call }: { call: Call }) {
             </div>
           );
         })}
+      </div>
+    </section>
+  );
+}
+
+function EventTimeline({ call }: { call: Call }) {
+  if (call.events.length === 0) return null;
+  return (
+    <section className="mt-8">
+      <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        System events
+      </h2>
+      <div className="rounded-xl border border-border/60 bg-card/60 px-4 py-3">
+        <ol className="space-y-1.5">
+          {call.events.map((e, i) => (
+            <li key={`${e.at}-${i}`} className="grid grid-cols-[76px_1fr] gap-3 text-[12.5px]">
+              <span className="whitespace-nowrap tabular-nums text-muted-foreground/70">
+                {new Date(e.at).toLocaleTimeString("en-US", {
+                  hour12: false,
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                })}
+              </span>
+              <span className="text-foreground">
+                {e.event}
+                {e.detail && <span className="text-muted-foreground"> · {e.detail}</span>}
+              </span>
+            </li>
+          ))}
+        </ol>
       </div>
     </section>
   );

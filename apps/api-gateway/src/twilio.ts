@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { ServerWebSocket } from "bun";
-import { endCall as lockCall, saveTranscript } from "./calls";
+import { endCall as lockCall, logCallEvent, saveTranscript } from "./calls";
 import { db } from "./db";
 import { env } from "./env";
 import { getAgentPrompt, PHONE_TRANSFER_APPENDIX } from "./prompt";
@@ -86,6 +86,7 @@ export async function handleTwilioIncoming(req: Request, publicOrigin: string): 
     .insert(calls)
     .values({ userId: `phone:${from}` })
     .returning();
+  await logCallEvent(row!.id, "call created", `twilio webhook from ${from}`);
   const streamUrl = `${publicOrigin.replace(/^http/, "ws")}/api/twilio/stream`;
   // When the stream closes, TwiML continues to <Redirect>: the resume handler
   // dials the agreed transfer target, or hangs up if there is none.
@@ -117,6 +118,13 @@ export async function handleTwilioResume(req: Request, publicOrigin: string): Pr
   }
   const rowId = reqUrl.searchParams.get("rowId") ?? "";
   const target = rowId ? takePendingTransfer(rowId) : null;
+  if (rowId) {
+    await logCallEvent(
+      rowId,
+      target ? "dialing transfer" : "no transfer arranged, hanging up",
+      target ? `${target.name} at ${target.phone}` : undefined,
+    );
+  }
   const twiml = target
     ? `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -152,7 +160,6 @@ class TwilioBridge {
   private xai: WebSocket | null = null;
   private streamSid = "";
   private rowId = "";
-  private userId = "";
   private readonly transcript: TranscriptTurn[] = [];
   private hangupRequested = false;
   private finalized = false;
@@ -176,8 +183,7 @@ class TwilioBridge {
         const start = ev as TwilioStartEvent;
         this.streamSid = start.start?.streamSid ?? start.streamSid ?? "";
         this.rowId = start.start?.customParameters?.rowId ?? "";
-        const from = start.start?.customParameters?.from ?? "unknown";
-        this.userId = `phone:${from}`;
+        if (this.rowId) void logCallEvent(this.rowId, "media stream started");
         void this.openXai();
         break;
       }
@@ -270,6 +276,7 @@ class TwilioBridge {
       });
       this.transcript.push({ role: "assistant", text: greeting });
       this.persist();
+      if (this.rowId) void logCallEvent(this.rowId, "xai session opened, greeting sent");
     });
 
     xai.addEventListener("message", (msg) => {
@@ -328,6 +335,7 @@ class TwilioBridge {
               },
             });
             this.hangupRequested = true;
+            if (this.rowId) void logCallEvent(this.rowId, "agent requested hangup (end_call)");
           } else if (ev.name === "transfer_call") {
             void this.handleTransfer(String(ev.call_id ?? ""), String(ev.arguments ?? ""), send);
           }
@@ -363,6 +371,11 @@ class TwilioBridge {
     const target = name ? await findTransferTarget(name) : null;
     if (target && this.rowId) {
       setPendingTransfer(this.rowId, target);
+      void logCallEvent(
+        this.rowId,
+        "transfer arranged",
+        `asked for "${name}" -> ${target.name} (${target.section}) at ${target.phone}`,
+      );
       this.transcript.push({
         role: "assistant",
         text: `(transferring the caller to ${target.name} in ${target.section})`,
@@ -380,6 +393,9 @@ class TwilioBridge {
       // and Twilio's <Redirect> dials the target.
       this.hangupRequested = true;
     } else {
+      if (this.rowId) {
+        void logCallEvent(this.rowId, "transfer failed", `asked for "${name}", nobody reachable`);
+      }
       send({
         type: "conversation.item.create",
         item: {
@@ -396,8 +412,8 @@ class TwilioBridge {
   }
 
   private persist(): void {
-    if (this.rowId && this.userId) {
-      void saveTranscript(this.userId, this.rowId, [...this.transcript]).catch(() => {});
+    if (this.rowId) {
+      void saveTranscript(this.rowId, [...this.transcript]).catch(() => {});
     }
   }
 
@@ -418,13 +434,15 @@ class TwilioBridge {
     } catch {
       /* ignore */
     }
-    if (this.rowId && this.userId) {
+    if (this.rowId) {
       const rowId = this.rowId;
-      const userId = this.userId;
       const transcript = [...this.transcript];
       void (async () => {
-        const locked = await lockCall(userId, rowId, transcript);
-        if (locked) await enqueueSummary({ callId: rowId, userId });
+        const locked = await lockCall(rowId, transcript);
+        if (locked) {
+          await logCallEvent(rowId, "call ended", `stream closed, ${locked.durationSeconds ?? 0}s`);
+          await enqueueSummary({ callId: rowId });
+        }
       })().catch((e) => console.error("[twilio] finalize failed:", e));
     }
   }

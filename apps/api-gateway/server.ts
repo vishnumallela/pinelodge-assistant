@@ -1,4 +1,4 @@
-import { createCall, endCall, getCall, listCalls, saveTranscript } from "./src/calls";
+import { createCall, endCall, getCall, listCalls, logCallEvent, saveTranscript } from "./src/calls";
 import { ensureSchema } from "./src/db";
 import { env } from "./src/env";
 import { getAgentPrompt, saveTemplate, DEFAULT_GREETING, DEFAULT_TEMPLATE } from "./src/prompt";
@@ -56,7 +56,8 @@ function withCors(res: Response, origin: string | null): Response {
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
-/** Resolve the signed-in user from the auth service (cookie/bearer forwarded). */
+/** Resolve the signed-in user from the auth service (cookie/bearer forwarded).
+ *  Single-admin application: any identity other than ADMIN_EMAIL is rejected. */
 async function sessionUser(req: Request): Promise<{ id: string } | null> {
   const cookie = req.headers.get("cookie");
   const authz = req.headers.get("authorization");
@@ -68,6 +69,8 @@ async function sessionUser(req: Request): Promise<{ id: string } | null> {
     });
     const data = res.ok ? ((await res.json()) as { user?: Record<string, unknown> } | null) : null;
     if (!data?.user) return null;
+    const email = String(data.user.email ?? "").toLowerCase();
+    if (email !== env.ADMIN_EMAIL) return null;
     return { id: String(data.user.id) };
   } catch {
     return null;
@@ -124,15 +127,19 @@ function readTranscript(body: unknown): TranscriptTurn[] {
     .filter((t) => t.text.trim() !== "");
 }
 
-async function handleCalls(req: Request, userId: string, path: string): Promise<Response> {
+async function handleCalls(req: Request, path: string): Promise<Response> {
   // rest is "", "/:id", "/:id/transcript", or "/:id/end"
   const rest = path.slice("/api/calls".length);
   const segments = rest.split("/").filter(Boolean);
 
   // /api/calls
   if (segments.length === 0) {
-    if (req.method === "GET") return json({ calls: await listCalls(userId) });
-    if (req.method === "POST") return json({ call: await createCall(userId) }, 201);
+    if (req.method === "GET") return json({ calls: await listCalls() });
+    if (req.method === "POST") {
+      const call = await createCall("console");
+      await logCallEvent(call.id, "call created", "console");
+      return json({ call }, 201);
+    }
     return json({ error: "Method not allowed" }, 405);
   }
 
@@ -142,7 +149,7 @@ async function handleCalls(req: Request, userId: string, path: string): Promise<
   // /api/calls/:id
   if (!sub) {
     if (req.method === "GET") {
-      const call = await getCall(userId, id);
+      const call = await getCall(id);
       return call ? json({ call }) : json({ error: "Call not found" }, 404);
     }
     return json({ error: "Method not allowed" }, 405);
@@ -152,15 +159,16 @@ async function handleCalls(req: Request, userId: string, path: string): Promise<
 
   // /api/calls/:id/transcript
   if (sub === "transcript" && req.method === "PUT") {
-    const ok = await saveTranscript(userId, id, readTranscript(body));
+    const ok = await saveTranscript(id, readTranscript(body));
     return ok ? json({ ok: true }) : json({ error: "Call is locked or not found" }, 409);
   }
 
   // /api/calls/:id/end
   if (sub === "end" && req.method === "POST") {
-    const row = await endCall(userId, id, readTranscript(body));
+    const row = await endCall(id, readTranscript(body));
     if (!row) return json({ error: "Call is locked or not found" }, 409);
-    await enqueueSummary({ callId: row.id, userId });
+    await logCallEvent(id, "call ended", `console, ${row.durationSeconds ?? 0}s`);
+    await enqueueSummary({ callId: row.id });
     return json({ call: row });
   }
 
@@ -324,7 +332,7 @@ const server = Bun.serve<TwilioSocketData>({
       } else if (path === "/api/realtime/token" && req.method === "POST") {
         res = await mintVoiceToken(user.id);
       } else if (path === "/api/calls" || path.startsWith("/api/calls/")) {
-        res = await handleCalls(req, user.id, path);
+        res = await handleCalls(req, path);
       } else if (path === "/api/staff" || path.startsWith("/api/staff/")) {
         res = await handleStaff(req, path);
       } else if (path === "/api/agent/prompt") {

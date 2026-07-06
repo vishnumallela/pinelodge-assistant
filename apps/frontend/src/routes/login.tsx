@@ -4,22 +4,13 @@ import { Loader2 } from "lucide-react";
 import { PineMark } from "@/components/brand/PineMark";
 import { toast } from "sonner";
 
-import { signIn, signUp } from "@/lib/auth-client";
+import { signIn } from "@/lib/auth-client";
 import { FACILITY_NAME, PRODUCT_NAME } from "@/lib/config";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-function usernameFromEmail(email: string): string {
-  const base = (email.split("@")[0] ?? "user")
-    .replace(/[^a-z0-9_]/gi, "")
-    .toLowerCase()
-    .slice(0, 20);
-  return `${base || "user"}_${crypto.randomUUID().slice(0, 4)}`;
-}
-
+/** Single-admin sign-in; account creation is disabled server-side. */
 export function LoginPage() {
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
-  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -38,25 +29,8 @@ export function LoginPage() {
 
     setBusy(true);
     try {
-      if (mode === "signup") {
-        const { error } = await signUp.email({
-          email: addr,
-          username: usernameFromEmail(addr),
-          name: name.trim() || (addr.split("@")[0] ?? addr),
-          password,
-        });
-        if (error) {
-          const taken = /already|exist/i.test(error.message ?? "");
-          throw new Error(
-            taken
-              ? "An account with this email already exists. Sign in instead."
-              : (error.message ?? "Could not create account."),
-          );
-        }
-      } else {
-        const { error } = await signIn.email({ email: addr, password });
-        if (error) throw new Error(error.message ?? "Invalid email or password.");
-      }
+      const { error } = await signIn.email({ email: addr, password });
+      if (error) throw new Error(error.message ?? "Invalid email or password.");
       window.location.href = "/";
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong.");
@@ -77,25 +51,12 @@ export function LoginPage() {
               {PRODUCT_NAME}
             </h1>
             <p className="mt-1.5 text-pretty text-sm text-muted-foreground">
-              Front desk console for {FACILITY_NAME}.
+              Admin console for {FACILITY_NAME}.
             </p>
           </div>
         </div>
 
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
-          {mode === "signup" && (
-            <label htmlFor="name" className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-muted-foreground">Name</span>
-              <Input
-                id="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Your name"
-                autoComplete="name"
-                className="h-11"
-              />
-            </label>
-          )}
           <label htmlFor="email" className="flex flex-col gap-1.5">
             <span className="text-xs font-medium text-muted-foreground">Email</span>
             <Input
@@ -118,27 +79,16 @@ export function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              autoComplete={mode === "signin" ? "current-password" : "new-password"}
+              autoComplete="current-password"
               className="h-11"
             />
           </label>
 
           <Button type="submit" size="lg" disabled={busy} className="mt-1 rounded-xl">
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-            {mode === "signin" ? "Sign in" : "Create account"}
+            Sign in
           </Button>
         </form>
-
-        <p className="mt-5 text-center text-sm text-muted-foreground">
-          {mode === "signin" ? "New here?" : "Already have an account?"}{" "}
-          <button
-            type="button"
-            className="relative rounded-sm font-medium text-foreground underline-offset-4 before:absolute before:-inset-x-2 before:-inset-y-2.5 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
-          >
-            {mode === "signin" ? "Create an account" : "Sign in"}
-          </button>
-        </p>
       </div>
     </div>
   );

@@ -15,6 +15,9 @@ const schema = z.object({
   // Auth service (identity lives there; we resolve sessions against it)
   BETTER_AUTH_URL: z.string().url().default("http://localhost:3001"),
 
+  // Single-admin application: only this identity may use the dashboard.
+  ADMIN_EMAIL: z.string().email().default("vishnu@stackaisolutions.com"),
+
   // Server (PORT is injected by hosts like Railway; API_PORT is the local default)
   PORT: z.coerce.number().int().positive().optional(),
   API_PORT: z.coerce.number().int().positive().default(3002),
@@ -62,6 +65,7 @@ export const env = {
   DATABASE_URL: raw.DATABASE_URL_APP,
   REDIS_URL: raw.REDIS_URL,
   AUTH_URL: raw.BETTER_AUTH_URL,
+  ADMIN_EMAIL: raw.ADMIN_EMAIL.toLowerCase(),
   PORT: raw.PORT ?? raw.API_PORT,
   ALLOWED_ORIGINS: raw.AUTH_TRUSTED_ORIGINS,
   XAI_API_KEY: raw.XAI_API_KEY,
