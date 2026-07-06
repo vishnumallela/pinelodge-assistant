@@ -10,15 +10,11 @@
   ],
   "globalEnv": [
     "NODE_ENV",
-    "DATABASE_URL_APP",
     "DATABASE_URL_AUTH",
     "OPENAI_API_KEY",
     "OPENAI_REALTIME_MODEL",
     "OPENAI_REALTIME_VOICE",
     "OPENAI_TRANSCRIBE_MODEL",
-    "OPENAI_SUMMARY_MODEL",
-    "FACILITY_NAME",
-    "FACILITY_TIMEZONE",
     "BETTER_AUTH_SECRET",
     "BETTER_AUTH_URL",
     "AUTH_TRUSTED_ORIGINS",
@@ -27,23 +23,13 @@
     "AUTH_PORT",
     "FRONTEND_PORT",
     "VITE_API_URL",
-    "VITE_AUTH_URL",
-    "CALL_REPORT_WEBHOOK_URL"
+    "VITE_AUTH_URL"
   ],
   "tasks": {
     "build": {
-      "dependsOn": [
-        "^build"
-      ],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!**/*.md",
-        "!**/.env.example",
-        "!**/dist/**"
-      ],
-      "outputs": [
-        "dist/**"
-      ]
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "!**/*.md", "!**/.env.example", "!**/dist/**"],
+      "outputs": ["dist/**"]
     },
     "dev": {
       "cache": false,
@@ -54,30 +40,12 @@
       "persistent": true
     },
     "typecheck": {
-      "dependsOn": [
-        "^build"
-      ],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!**/*.md",
-        "!**/dist/**"
-      ],
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "!**/*.md", "!**/dist/**"],
       "outputs": []
     },
     "lint": {
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!**/dist/**",
-        "!**/*.md"
-      ],
-      "outputs": []
-    },
-    "test": {
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!**/dist/**",
-        "!**/*.md"
-      ],
+      "inputs": ["$TURBO_DEFAULT$", "!**/dist/**", "!**/*.md"],
       "outputs": []
     },
     "format": {
@@ -85,24 +53,13 @@
       "outputs": []
     },
     "format:check": {
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!**/dist/**"
-      ],
+      "inputs": ["$TURBO_DEFAULT$", "!**/dist/**"],
       "outputs": []
     },
     "check": {
-      "dependsOn": [
-        "typecheck",
-        "lint",
-        "test",
-        "format:check"
-      ]
+      "dependsOn": ["typecheck", "lint", "format:check"]
     },
     "db:migrate": {
-      "cache": false
-    },
-    "db:generate": {
       "cache": false
     },
     "clean": {

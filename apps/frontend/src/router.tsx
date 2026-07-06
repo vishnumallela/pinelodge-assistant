@@ -7,14 +7,10 @@ import {
 } from "@tanstack/react-router";
 import type { QueryClient } from "@tanstack/react-query";
 import { queryClient } from "@/lib/query-client";
-import { orpc } from "@/lib/orpc";
 import { sessionQuery } from "@/lib/session";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { NotFound, RouteError } from "@/components/layout/RouteFallbacks";
 import { HomePage } from "@/routes/home";
-import { CallsPage } from "@/routes/calls";
-import { CallDetailPage } from "@/routes/call-detail";
-import { StaffPage } from "@/routes/staff";
 import { LoginPage } from "@/routes/login";
 
 interface RouterContext {
@@ -45,30 +41,7 @@ const appRoute = createRoute({
 
 const indexRoute = createRoute({ getParentRoute: () => appRoute, path: "/", component: HomePage });
 
-const callsRoute = createRoute({
-  getParentRoute: () => appRoute,
-  path: "/calls",
-  loader: ({ context }) => context.queryClient.ensureQueryData(orpc.calls.list.queryOptions()),
-  component: CallsPage,
-});
-
-const callDetailRoute = createRoute({
-  getParentRoute: () => appRoute,
-  path: "/calls/$callId",
-  component: CallDetailPage,
-});
-
-const staffRoute = createRoute({
-  getParentRoute: () => appRoute,
-  path: "/staff",
-  loader: ({ context }) => context.queryClient.ensureQueryData(orpc.staff.list.queryOptions()),
-  component: StaffPage,
-});
-
-const routeTree = rootRoute.addChildren([
-  loginRoute,
-  appRoute.addChildren([indexRoute, callsRoute, callDetailRoute, staffRoute]),
-]);
+const routeTree = rootRoute.addChildren([loginRoute, appRoute.addChildren([indexRoute])]);
 
 export const router = createRouter({
   routeTree,

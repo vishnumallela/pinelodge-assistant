@@ -1,16 +1,13 @@
-import { Link } from "@tanstack/react-router";
 import { useCallSession } from "@/lib/call-session";
 import { VoiceOrb, type OrbState } from "@/components/voice/VoiceOrb";
 import { CallStatus } from "@/components/voice/CallChrome";
 import { SuggestionChips } from "@/components/voice/SuggestionChips";
 import { TranscriptPanel } from "@/components/voice/TranscriptPanel";
-import { CallHeader } from "@/components/voice/CallHeader";
 import { Composer } from "@/components/voice/Composer";
 import { FACILITY_NAME } from "@/lib/config";
 
 export function HomePage() {
-  const { agent, agentName, callerPrompts, feed, liveCall, lastCallId, startCall, endCall, send } =
-    useCallSession();
+  const { agent, agentName, callerPrompts, feed, startCall, endCall, send } = useCallSession();
 
   const inCall = agent.isConnected || agent.status === "connecting";
   const empty = feed.length === 0;
@@ -49,21 +46,7 @@ export function HomePage() {
             what you need, and redirects you to the right person.
           </p>
         </div>
-        <div className="w-full max-w-3xl px-4 md:px-5">
-          {composer}
-          {lastCallId && (
-            <p className="mt-4 text-center text-sm text-muted-foreground">
-              Call saved.{" "}
-              <Link
-                to="/calls/$callId"
-                params={{ callId: lastCallId }}
-                className="font-medium text-foreground underline-offset-4 hover:underline"
-              >
-                View the call report
-              </Link>
-            </p>
-          )}
-        </div>
+        <div className="w-full max-w-3xl px-4 md:px-5">{composer}</div>
       </main>
     );
   }
@@ -71,7 +54,6 @@ export function HomePage() {
   return (
     <main className="flex min-h-0 flex-1">
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-        {liveCall && <CallHeader call={liveCall} connected={agent.isConnected} />}
         <TranscriptPanel
           className="min-h-0 flex-1"
           items={feed}
@@ -98,16 +80,7 @@ export function HomePage() {
                 composer
               ) : (
                 <p className="py-4 text-center text-sm text-muted-foreground">
-                  This call has ended.{" "}
-                  {lastCallId && (
-                    <Link
-                      to="/calls/$callId"
-                      params={{ callId: lastCallId }}
-                      className="font-medium text-foreground underline-offset-4 hover:underline"
-                    >
-                      View the call report
-                    </Link>
-                  )}
+                  This call has ended.
                 </p>
               )}
             </div>

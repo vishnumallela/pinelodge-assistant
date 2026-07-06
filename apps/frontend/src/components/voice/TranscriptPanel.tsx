@@ -1,17 +1,5 @@
 import { memo, useState } from "react";
-import {
-  ArrowRightLeft,
-  CalendarClock,
-  Check,
-  Copy,
-  Info,
-  NotebookPen,
-  PhoneForwarded,
-  PhoneOff,
-  ShieldCheck,
-  Voicemail,
-  type LucideIcon,
-} from "lucide-react";
+import { Check, Copy } from "lucide-react";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
@@ -27,40 +15,6 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import type { FeedItem } from "@/lib/call-session";
 
-/** Presentation for each tool the assistant can run mid-call. */
-const TOOL_META: Record<string, { running: string; done: string; icon: LucideIcon }> = {
-  get_facility_info: {
-    running: "Looking up community info",
-    done: "Looked up community info",
-    icon: Info,
-  },
-  screen_call: { running: "Screening the call", done: "Call screened", icon: ShieldCheck },
-  save_caller_info: {
-    running: "Noting caller details",
-    done: "Caller details saved",
-    icon: NotebookPen,
-  },
-  check_availability: {
-    running: "Checking the schedule",
-    done: "Schedule checked",
-    icon: CalendarClock,
-  },
-  route_call: { running: "Routing the call", done: "Call routed", icon: ArrowRightLeft },
-  complete_transfer: {
-    running: "Transferring the line",
-    done: "Line transferred",
-    icon: PhoneForwarded,
-  },
-  leave_voicemail: { running: "Saving the voicemail", done: "Voicemail saved", icon: Voicemail },
-  end_call: { running: "Ending the call", done: "Call ended", icon: PhoneOff },
-};
-
-/**
- * The live conversation: completed turns interleaved with the tool activity
- * that produced them, plus the assistant's speaking/thinking state. Built on
- * the shadcn conversation primitives — Message/Bubble for turns, Marker for
- * inline activity, MessageScroller for live-edge scrolling.
- */
 export function TranscriptPanel({
   items,
   agentName,
@@ -86,21 +40,15 @@ export function TranscriptPanel({
             aria-busy={Boolean(speaking || thinking)}
             className="mx-auto w-full max-w-3xl gap-4 px-4 pb-40 pt-6 md:px-5"
           >
-            {items.map((item) =>
-              item.kind === "message" ? (
-                <MessageScrollerItem
-                  key={item.id}
-                  messageId={item.id}
-                  scrollAnchor={item.role === "user"}
-                >
-                  <Turn from={item.role} text={item.text} />
-                </MessageScrollerItem>
-              ) : (
-                <MessageScrollerItem key={item.id} messageId={item.id}>
-                  <ToolMarker name={item.name} status={item.status} />
-                </MessageScrollerItem>
-              ),
-            )}
+            {items.map((item) => (
+              <MessageScrollerItem
+                key={item.id}
+                messageId={item.id}
+                scrollAnchor={item.role === "user"}
+              >
+                <Turn from={item.role} text={item.text} />
+              </MessageScrollerItem>
+            ))}
             {speaking ? (
               <MessageScrollerItem messageId="speaking">
                 <Marker role="status" className="[animation:message-in_0.28s_var(--ease-out)]">
@@ -155,29 +103,6 @@ const Turn = memo(function Turn({ from, text }: { from: "user" | "assistant"; te
         </MessageFooter>
       </MessageContent>
     </Message>
-  );
-});
-
-const ToolMarker = memo(function ToolMarker({
-  name,
-  status,
-}: {
-  name: string;
-  status: "running" | "done";
-}) {
-  const meta = TOOL_META[name];
-  const label = meta ? (status === "running" ? meta.running : meta.done) : name;
-  const Icon = meta?.icon ?? Info;
-  return (
-    <Marker
-      role={status === "running" ? "status" : undefined}
-      className="[animation:message-in_0.28s_var(--ease-out)]"
-    >
-      <MarkerIcon>{status === "running" ? <Spinner /> : <Icon className="size-3.5" />}</MarkerIcon>
-      <MarkerContent className={status === "running" ? "shimmer" : undefined}>
-        {status === "running" ? <>{label}&hellip;</> : label}
-      </MarkerContent>
-    </Marker>
   );
 });
 

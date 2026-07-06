@@ -1,13 +1,4 @@
-import { RPCHandler } from "@orpc/server/fetch";
-import { db, initDb } from "./src/db";
 import { env } from "./src/env";
-import { router } from "./src/routers";
-import { seedDefaultStaff } from "./src/lib/staff";
-
-await initDb();
-await seedDefaultStaff(db);
-
-const rpc = new RPCHandler(router);
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -16,14 +7,13 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
-/* ── CORS (frontend calls us cross-origin with credentials) ── */
 const allowed = new Set(env.ALLOWED_ORIGINS);
 function corsHeaders(origin: string | null): Record<string, string> {
   const allow = origin && allowed.has(origin) ? origin : (env.ALLOWED_ORIGINS[0] ?? "");
   return {
     "Access-Control-Allow-Origin": allow,
     "Access-Control-Allow-Credentials": "true",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
@@ -53,10 +43,8 @@ async function sessionUser(req: Request): Promise<{ id: string } | null> {
   }
 }
 
-// Mint a short-lived OpenAI Realtime client secret (ek_...) so the browser can
-// open a WebRTC call directly against the realtime model without ever seeing
-// our standard API key. Voice/model are pinned here; per-call instructions and
-// tools are applied client-side via session.update on the data channel.
+/** Mint a short-lived OpenAI Realtime client secret (ek_...) so the browser
+ *  can open a WebRTC call without ever seeing our standard API key. */
 async function mintVoiceToken(req: Request): Promise<Response> {
   const user = await sessionUser(req);
   if (!user) return json({ error: "Sign in to start a call." }, 401);
@@ -110,17 +98,10 @@ const server = Bun.serve({
 
     const path = new URL(req.url).pathname;
     let res: Response;
-
     if (path === "/health") res = json({ ok: true, service: "api-gateway" });
     else if (path === "/api/realtime/token" && req.method === "POST")
       res = await mintVoiceToken(req);
-    else if (path.startsWith("/orpc")) {
-      const { matched, response } = await rpc.handle(req, {
-        prefix: "/orpc",
-        context: { headers: req.headers },
-      });
-      res = matched && response ? response : json({ error: "Not found" }, 404);
-    } else res = json({ error: "Not found" }, 404);
+    else res = json({ error: "Not found" }, 404);
 
     return withCors(res, origin);
   },

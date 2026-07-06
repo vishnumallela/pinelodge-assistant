@@ -1,57 +1,27 @@
 /**
- * useVoiceAgent - OpenAI Realtime (WebRTC) React hook
- * ============================================================================
- *
- * A browser voice-agent hook for the OpenAI Realtime API (gpt-realtime-2),
- * over WebRTC — the transport OpenAI recommends for browsers:
- *
- *   - mic capture goes out as an RTP audio track (Opus); no manual PCM
- *     resampling, base64 framing, or input_audio_buffer.append plumbing
- *   - the agent's speech arrives as a remote audio track played by an
- *     <audio> element; barge-in truncation is handled server-side
- *   - JSON events (session.update, transcripts, tool calls) flow over the
- *     "oai-events" data channel, same event protocol as the WebSocket API
- *   - tool calls run client-side handlers, then we reply + response.create
- *
- * The provider API key never reaches the browser: `getToken()` returns a
- * short-lived ephemeral client secret (ek_...) minted by our backend, used
- * as the Bearer token for the SDP exchange only.
+ * OpenAI Realtime (WebRTC) voice-agent hook for gpt-realtime-2.
+ * The mic goes out as an RTP audio track, the agent's speech arrives as a
+ * remote track, and JSON events flow over the "oai-events" data channel.
+ * The browser only ever sees a short-lived ephemeral token (ek_...) minted
+ * by our backend — never the provider API key.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const CALLS_ENDPOINT = "https://api.openai.com/v1/realtime/calls";
 const DEFAULT_MODEL = "gpt-realtime-2";
-// marin/cedar are OpenAI's recommended best-quality voices.
 const DEFAULT_VOICE = "marin";
 const DEFAULT_TRANSCRIBE_MODEL = "whisper-1";
-
-/* ── public types ─────────────────────────────────────────────────────── */
 
 export interface VoiceFunctionTool {
   type: "function";
   name: string;
   description?: string;
   parameters: Record<string, unknown>;
-  /** Runs in the browser when the model calls this tool. Return value is
-   *  JSON-encoded and sent back as the function_call_output. */
   handler?: (args: Record<string, unknown>) => Promise<unknown> | unknown;
 }
 
-export interface TurnDetectionConfig {
-  type: "semantic_vad" | "server_vad";
-  /** semantic_vad: how eagerly the model ends the user's turn. */
-  eagerness?: "low" | "medium" | "high" | "auto";
-  /** server_vad tuning knobs. */
-  threshold?: number;
-  silence_duration_ms?: number;
-  prefix_padding_ms?: number;
-  /** server_vad: ms of caller silence before the model re-engages. */
-  idle_timeout_ms?: number;
-}
-
 export interface VoiceTokenInfo {
-  /** Ephemeral client secret (ek_...) minted by our backend. */
   token: string;
   model?: string;
   voice?: string;
@@ -60,17 +30,12 @@ export interface VoiceTokenInfo {
 
 export interface UseVoiceAgentOptions {
   getToken: () => Promise<VoiceTokenInfo>;
-  model?: string;
-  voice?: "marin" | "cedar" | "alloy" | "ash" | "coral" | "sage" | "verse" | (string & {});
   instructions?: string;
   tools?: VoiceFunctionTool[];
-  turnDetection?: TurnDetectionConfig;
-  /** Domain vocabulary hint for the transcription model (names, jargon). */
+  /** Domain vocabulary hint for the transcription model. */
   transcriptionPrompt?: string;
-  /** If set, the agent speaks an opening line right after connect. */
+  /** If set, the agent speaks this exact opening line right after connect. */
   greeting?: string;
-  onToolCall?: (info: { name: string; args: Record<string, unknown> }) => void;
-  onToolResult?: (info: { name: string; result: unknown }) => void;
   onError?: (message: string) => void;
 }
 
@@ -81,7 +46,6 @@ export interface VoiceHistoryItem {
   role: "user" | "assistant";
   text: string;
   status: "in_progress" | "completed";
-  /** The response this turn belongs to; items sharing it are one utterance. */
   responseId?: string;
 }
 
@@ -93,74 +57,12 @@ export interface UseVoiceAgentReturn {
   isAgentThinking: boolean;
   isToolRunning: boolean;
   isMuted: boolean;
-  levels: { user: number; agent: number };
   history: VoiceHistoryItem[];
-  liveUserText: string;
-  liveAgentText: string;
-  lastToolName: string | null;
-  error: string | null;
   connect: () => Promise<void>;
   disconnect: () => void;
-  mute: () => void;
-  unmute: () => void;
   toggleMute: () => void;
   sendText: (text: string) => void;
-  interrupt: () => void;
 }
-
-/* ── debug tap ────────────────────────────────────────────────────────── */
-
-/** Dev-only event tap: set localStorage "pinelodge.debugRealtime" and every
- *  data-channel event (both directions) lands on window.__rtEvents for
- *  inspection when diagnosing turn-taking or duplication issues. */
-function debugTap(dir: "in" | "out", ev: Record<string, unknown>): void {
-  if (!import.meta.env.DEV) return;
-  try {
-    if (!localStorage.getItem("pinelodge.debugRealtime")) return;
-    const w = window as unknown as { __rtEvents?: Record<string, unknown>[] };
-    w.__rtEvents = w.__rtEvents ?? [];
-    const resp = ev.response as { id?: string } | undefined;
-    const item = ev.item as { id?: string } | undefined;
-    w.__rtEvents.push({
-      t: Date.now(),
-      dir,
-      type: ev.type,
-      rid: (ev.response_id as string | undefined) ?? resp?.id,
-      iid: (ev.item_id as string | undefined) ?? item?.id,
-      text: typeof ev.transcript === "string" ? (ev.transcript as string).slice(0, 60) : undefined,
-    });
-  } catch {
-    /* never interfere with the call */
-  }
-}
-
-/* ── audio level metering ─────────────────────────────────────────────── */
-
-/** Peak meter over an AnalyserNode, shared by the mic and the agent track. */
-class LevelMeter {
-  analyser: AnalyserNode;
-  private buf: Uint8Array<ArrayBuffer>;
-
-  constructor(ctx: AudioContext, stream: MediaStream) {
-    const source = ctx.createMediaStreamSource(stream);
-    this.analyser = ctx.createAnalyser();
-    this.analyser.fftSize = 256;
-    source.connect(this.analyser);
-    this.buf = new Uint8Array(this.analyser.fftSize);
-  }
-
-  level(): number {
-    this.analyser.getByteTimeDomainData(this.buf);
-    let peak = 0;
-    for (let i = 0; i < this.buf.length; i++) {
-      const v = Math.abs((this.buf[i]! - 128) / 128);
-      if (v > peak) peak = v;
-    }
-    return peak;
-  }
-}
-
-/* ── the hook ─────────────────────────────────────────────────────────── */
 
 export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentReturn {
   const optsRef = useRef(options);
@@ -172,34 +74,24 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
   const [isAgentThinking, setIsAgentThinking] = useState(false);
   const [isToolRunning, setIsToolRunning] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [levels, setLevels] = useState({ user: 0, agent: 0 });
   const [history, setHistory] = useState<VoiceHistoryItem[]>([]);
-  const [liveUserText, setLiveUserText] = useState("");
-  const [liveAgentText, setLiveAgentText] = useState("");
-  const [lastToolName, setLastToolName] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
-  const meterCtxRef = useRef<AudioContext | null>(null);
-  const micMeterRef = useRef<LevelMeter | null>(null);
-  const agentMeterRef = useRef<LevelMeter | null>(null);
   const mutedRef = useRef(false);
-  const rafRef = useRef<number | null>(null);
   const genRef = useRef(0);
   const greetedRef = useRef(false);
-  const voiceConfigRef = useRef<{ voice: string; transcribeModel: string }>({
+  const voiceConfigRef = useRef({
     voice: DEFAULT_VOICE,
     transcribeModel: DEFAULT_TRANSCRIBE_MODEL,
   });
-  const userSpeakingRef = useRef(false); // is the user mid-utterance (VAD)
-  const pendingToolResponseRef = useRef(false); // defer response.create until user stops
-  const activeResponseRef = useRef(false); // a model response is in flight
+  const userSpeakingRef = useRef(false);
+  const pendingToolResponseRef = useRef(false);
+  const activeResponseRef = useRef(false);
 
   const fail = useCallback((message: string) => {
-    setError(message);
     setStatus("error");
     try {
       optsRef.current.onError?.(message);
@@ -211,7 +103,6 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
   const sendEvent = useCallback((event: Record<string, unknown>) => {
     const dc = dcRef.current;
     if (dc && dc.readyState === "open") dc.send(JSON.stringify(event));
-    debugTap("out", event);
   }, []);
 
   const upsert = useCallback(
@@ -250,26 +141,13 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
         tool_choice: "auto",
         audio: {
           input: {
-            // Language pin (ISO-639-1) improves accuracy and latency per the
-            // API docs; the prompt supplies domain vocabulary (a keyword list
-            // for whisper-1) so proper names transcribe correctly.
             transcription: {
               model: cfg.transcribeModel,
               language: "en",
               ...(o.transcriptionPrompt ? { prompt: o.transcriptionPrompt } : {}),
             },
-            // Noise reduction is OFF by API default; without it, ambient
-            // noise fires speech_started while the agent talks and the server
-            // cancels her mid-word. far_field is the documented profile for
-            // laptop and room microphones (near_field is for headsets), and
-            // it filters the audio before it reaches VAD and the model.
             noise_reduction: { type: "far_field" },
-            turn_detection: o.turnDetection ?? {
-              // Semantic VAD ends the user's turn from meaning, not a fixed
-              // silence window: trailing "uhm…" keeps the turn open, and a
-              // finished sentence responds without the dead-air wait. auto
-              // (= medium) balances patience and latency; far_field noise
-              // reduction upstream keeps room noise from tripping barge-in.
+            turn_detection: {
               type: "semantic_vad",
               eagerness: "auto",
               create_response: true,
@@ -277,7 +155,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
             },
           },
           output: {
-            voice: o.voice ?? cfg.voice,
+            voice: cfg.voice,
           },
         },
       },
@@ -292,20 +170,13 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
       } catch {
         /* leave empty */
       }
-      setLastToolName(name);
       setIsToolRunning(true);
-      try {
-        optsRef.current.onToolCall?.({ name, args });
-      } catch {
-        /* ignore */
-      }
 
       const tool = optsRef.current.tools?.find((t) => t.name === name);
       let output: unknown = { ok: true };
       if (tool?.handler) {
         try {
           output = await tool.handler(args);
-          optsRef.current.onToolResult?.({ name, result: output });
         } catch (e) {
           output = { error: e instanceof Error ? e.message : String(e) };
         }
@@ -319,12 +190,8 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
           output: typeof output === "string" ? output : JSON.stringify(output),
         },
       });
-      // Two races to avoid before asking for the follow-up response:
-      // - the user started speaking while the tool ran (creating now clips
-      //   the start of their utterance), or
-      // - VAD auto-created a response in the meantime (creating now collides
-      //   with the active response and the turn breaks).
-      // In both cases defer; speech_stopped / response.done fire it later.
+      // Defer the follow-up response if the user is mid-utterance or another
+      // response is active; speech_stopped / response.done fire it later.
       if (userSpeakingRef.current || activeResponseRef.current) {
         pendingToolResponseRef.current = true;
       } else {
@@ -337,15 +204,11 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
 
   const handleServerEvent = useCallback(
     (ev: { type: string; [k: string]: unknown }) => {
-      debugTap("in", ev);
       switch (ev.type) {
         case "session.updated":
           if (status !== "connected") setStatus("connected");
           if (optsRef.current.greeting && !greetedRef.current) {
             greetedRef.current = true;
-            // Verbatim, single-utterance greeting: freeform "greet the caller"
-            // instructions let the model improvise and often produce a second
-            // output item repeating part of the greeting aloud.
             sendEvent({
               type: "response.create",
               response: {
@@ -356,8 +219,6 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
           break;
 
         case "input_audio_buffer.speech_started":
-          // Barge-in: with interrupt_response on, the server stops the active
-          // response and clears buffered output audio on its own.
           userSpeakingRef.current = true;
           setIsUserSpeaking(true);
           break;
@@ -365,16 +226,10 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
         case "input_audio_buffer.speech_stopped":
           userSpeakingRef.current = false;
           setIsUserSpeaking(false);
-          // Fire a tool-result response that we deferred while the user spoke
-          // (mitigates the "first word clipped" race).
           if (pendingToolResponseRef.current && !activeResponseRef.current) {
             pendingToolResponseRef.current = false;
             sendEvent({ type: "response.create" });
           }
-          break;
-
-        case "conversation.item.input_audio_transcription.delta":
-          setLiveUserText((t) => t + ((ev.delta as string) ?? ""));
           break;
 
         case "conversation.item.input_audio_transcription.completed": {
@@ -386,7 +241,6 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
               status: "completed",
             });
           }
-          setLiveUserText("");
           break;
         }
 
@@ -395,8 +249,6 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
           setIsAgentThinking(true);
           break;
 
-        // WebRTC-only lifecycle events for the agent's audio track — they track
-        // actual speaker output, so no playhead bookkeeping is needed.
         case "output_audio_buffer.started":
           setIsAgentSpeaking(true);
           setIsAgentThinking(false);
@@ -405,10 +257,6 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
         case "output_audio_buffer.stopped":
         case "output_audio_buffer.cleared":
           setIsAgentSpeaking(false);
-          break;
-
-        case "response.output_audio_transcript.delta":
-          setLiveAgentText((t) => t + ((ev.delta as string) ?? ""));
           break;
 
         case "response.output_audio_transcript.done": {
@@ -421,7 +269,6 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
               responseId: ev.response_id as string | undefined,
             });
           }
-          setLiveAgentText("");
           break;
         }
 
@@ -432,8 +279,6 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
         case "response.done":
           activeResponseRef.current = false;
           setIsAgentThinking(false);
-          // A tool finished while another response was active: request the
-          // follow-up now that the line is free (unless the user is talking).
           if (pendingToolResponseRef.current && !userSpeakingRef.current) {
             pendingToolResponseRef.current = false;
             sendEvent({ type: "response.create" });
@@ -443,14 +288,9 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
         case "error": {
           const e = ev.error as { message?: string } | undefined;
           const msg = e?.message ?? "Realtime error";
-          if (/not found|no active response|cancel|already has an active response/i.test(msg)) {
-            break;
-          }
-          setError(msg);
-          try {
-            optsRef.current.onError?.(msg);
-          } catch {
-            /* ignore */
+          // Benign races (cancelling a finished response, etc.) are ignored.
+          if (!/not found|no active response|cancel|already has an active response/i.test(msg)) {
+            fail(msg);
           }
           break;
         }
@@ -459,22 +299,12 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
           break;
       }
     },
-    [runToolCall, sendEvent, status, upsert],
+    [fail, runToolCall, sendEvent, status, upsert],
   );
 
   const teardown = useCallback(() => {
-    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-    rafRef.current = null;
     micStreamRef.current?.getTracks().forEach((t) => t.stop());
     micStreamRef.current = null;
-    micMeterRef.current = null;
-    agentMeterRef.current = null;
-    try {
-      void meterCtxRef.current?.close();
-    } catch {
-      /* ignore */
-    }
-    meterCtxRef.current = null;
     if (audioElRef.current) {
       audioElRef.current.srcObject = null;
       audioElRef.current = null;
@@ -513,15 +343,11 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
     setIsAgentSpeaking(false);
     setIsAgentThinking(false);
     setIsToolRunning(false);
-    setLevels({ user: 0, agent: 0 });
-    setLiveUserText("");
-    setLiveAgentText("");
   }, [teardown]);
 
   const connect = useCallback(async () => {
     if (pcRef.current) return;
     const myGen = ++genRef.current;
-    setError(null);
     setHistory([]);
     setStatus("connecting");
     greetedRef.current = false;
@@ -572,18 +398,9 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
     pcRef.current = pc;
     for (const track of mic.getAudioTracks()) pc.addTrack(track, mic);
 
-    // The agent speaks through a plain <audio> element; the browser's WebRTC
-    // stack owns jitter buffering and echo-cancellation reference wiring.
     const audioEl = new Audio();
     audioEl.autoplay = true;
     audioElRef.current = audioEl;
-
-    type Ctor = typeof AudioContext;
-    const AC = (window.AudioContext ||
-      (window as unknown as { webkitAudioContext: Ctor }).webkitAudioContext) as Ctor;
-    const meterCtx = new AC();
-    meterCtxRef.current = meterCtx;
-    micMeterRef.current = new LevelMeter(meterCtx, mic);
 
     pc.ontrack = (e) => {
       if (myGen !== genRef.current) return;
@@ -591,7 +408,6 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
       if (!stream) return;
       audioEl.srcObject = stream;
       void audioEl.play().catch(() => undefined);
-      agentMeterRef.current = new LevelMeter(meterCtx, stream);
     };
 
     pc.onconnectionstatechange = () => {
@@ -609,7 +425,6 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
       if (myGen !== genRef.current) return;
       sendEvent(buildSession());
     };
-    // RTCDataChannel message handler (Realtime API events), not a cross-window postMessage listener.
     dc.onmessage = (msg) => {
       if (myGen !== genRef.current) return;
       try {
@@ -622,7 +437,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
     try {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      const model = optsRef.current.model ?? tokenInfo.model ?? DEFAULT_MODEL;
+      const model = tokenInfo.model ?? DEFAULT_MODEL;
       const resp = await fetch(`${CALLS_ENDPOINT}?model=${encodeURIComponent(model)}`, {
         method: "POST",
         headers: {
@@ -642,55 +457,14 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
       if (myGen !== genRef.current) return;
       fail(e instanceof Error ? e.message : "Could not start the call.");
       teardown();
-      return;
     }
-
-    // Visualizer loop. Runs at rAF rate but only commits level state ~25fps and
-    // only when it actually changes, otherwise the whole console re-renders
-    // 60x/s and keeps re-rendering through silence.
-    let lastEmit = 0;
-    let lastU = -1;
-    let lastA = -1;
-    const tick = () => {
-      if (myGen !== genRef.current) return;
-      const now = performance.now();
-      if (now - lastEmit >= 40) {
-        lastEmit = now;
-        const a = Math.round((agentMeterRef.current?.level() ?? 0) * 100) / 100;
-        const u = mutedRef.current
-          ? 0
-          : Math.round((micMeterRef.current?.level() ?? 0) * 100) / 100;
-        if (u !== lastU || a !== lastA) {
-          lastU = u;
-          lastA = a;
-          setLevels({ user: u, agent: a });
-        }
-      }
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buildSession, fail, handleServerEvent, sendEvent, teardown]);
 
-  const setMicEnabled = useCallback((enabled: boolean) => {
-    micStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = enabled));
-  }, []);
-
-  const mute = useCallback(() => {
-    mutedRef.current = true;
-    setMicEnabled(false);
-    setIsMuted(true);
-  }, [setMicEnabled]);
-  const unmute = useCallback(() => {
-    mutedRef.current = false;
-    setMicEnabled(true);
-    setIsMuted(false);
-  }, [setMicEnabled]);
   const toggleMute = useCallback(() => {
     mutedRef.current = !mutedRef.current;
-    setMicEnabled(!mutedRef.current);
+    micStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = !mutedRef.current));
     setIsMuted(mutedRef.current);
-  }, [setMicEnabled]);
+  }, []);
 
   const sendText = useCallback(
     (text: string) => {
@@ -700,26 +474,16 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
         type: "conversation.item.create",
         item: { type: "message", role: "user", content: [{ type: "input_text", text: trimmed }] },
       });
-      // If a response is already in flight (e.g. a tool follow-up), creating
-      // another collides and the reply can ignore this message. Cancel the
-      // stale one so the reply is generated with this message in context.
+      // Cancel an in-flight response so the reply sees this message.
       if (activeResponseRef.current) {
         sendEvent({ type: "response.cancel" });
         sendEvent({ type: "output_audio_buffer.clear" });
       }
       sendEvent({ type: "response.create" });
-      // Typed input produces no transcription events, so record it directly.
       upsert(crypto.randomUUID(), { role: "user", text: trimmed, status: "completed" });
     },
     [sendEvent, upsert],
   );
-
-  const interrupt = useCallback(() => {
-    sendEvent({ type: "response.cancel" });
-    sendEvent({ type: "output_audio_buffer.clear" });
-    setIsAgentSpeaking(false);
-    setIsAgentThinking(false);
-  }, [sendEvent]);
 
   useEffect(() => () => disconnect(), [disconnect]);
 
@@ -732,19 +496,11 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
       isAgentThinking,
       isToolRunning,
       isMuted,
-      levels,
       history,
-      liveUserText,
-      liveAgentText,
-      lastToolName,
-      error,
       connect,
       disconnect,
-      mute,
-      unmute,
       toggleMute,
       sendText,
-      interrupt,
     }),
     [
       status,
@@ -753,19 +509,11 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
       isAgentThinking,
       isToolRunning,
       isMuted,
-      levels,
       history,
-      liveUserText,
-      liveAgentText,
-      lastToolName,
-      error,
       connect,
       disconnect,
-      mute,
-      unmute,
       toggleMute,
       sendText,
-      interrupt,
     ],
   );
 }
