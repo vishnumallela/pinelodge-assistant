@@ -12,7 +12,6 @@ COPY package.json bun.lock ./
 COPY apps/auth/package.json ./apps/auth/
 COPY apps/api-gateway/package.json ./apps/api-gateway/
 COPY apps/frontend/package.json ./apps/frontend/
-COPY packages/api-contracts/package.json ./packages/api-contracts/
 RUN bun install --frozen-lockfile --production
 
 # App source.

@@ -10,10 +10,8 @@ COPY package.json bun.lock ./
 COPY apps/frontend/package.json ./apps/frontend/
 COPY apps/auth/package.json ./apps/auth/
 COPY apps/api-gateway/package.json ./apps/api-gateway/
-COPY packages/api-contracts/package.json ./packages/api-contracts/
 RUN bun install --frozen-lockfile
 COPY tsconfig.base.json ./
-COPY packages ./packages
 COPY apps/frontend ./apps/frontend
 # Public service URLs the browser will call (override at build time).
 ARG VITE_AUTH_URL=http://localhost:3001
