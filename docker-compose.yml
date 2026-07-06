@@ -1,6 +1,39 @@
 name: pinelodge-assistant
 
 services:
+  postgres-app:
+    image: postgres:17-alpine
+    container_name: pinelodge-postgres-app
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pinelodge
+      POSTGRES_PASSWORD: pinelodge
+      POSTGRES_DB: pinelodge_app
+    ports:
+      - "5443:5432"
+    volumes:
+      - postgres_app_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pinelodge -d pinelodge_app"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: pinelodge-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   postgres-auth:
     image: postgres:17-alpine
     container_name: pinelodge-postgres-auth
@@ -44,9 +77,15 @@ services:
     restart: unless-stopped
     env_file: apps/api-gateway/.env
     environment:
-      # Reach the auth service over the compose network.
+      # Reach sibling services over the compose network.
       BETTER_AUTH_URL: http://auth:3001
+      DATABASE_URL_APP: postgres://pinelodge:pinelodge@postgres-app:5432/pinelodge_app
+      REDIS_URL: redis://redis:6379
     depends_on:
+      postgres-app:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
       auth:
         condition: service_started
     ports:
@@ -69,4 +108,6 @@ services:
       - "3000:80"
 
 volumes:
+  postgres_app_data:
   postgres_auth_data:
+  redis_data:

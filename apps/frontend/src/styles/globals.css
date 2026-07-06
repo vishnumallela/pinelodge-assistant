@@ -10,28 +10,40 @@
 }
 
 :root {
-  --background: #ffffff;
-  --foreground: #0a0a0a;
-  --card: #ffffff;
-  --card-foreground: #0a0a0a;
+  /* Reception ledger — warm paper, ink, brass, sage. Warm neutrals carry the
+     structure; brass is the scarce accent for live/primary moments; sage marks
+     a resolved, summarized call. */
+  --background: #faf8f4; /* bone paper */
+  --foreground: #211c18; /* warm ink */
+  --card: #ffffff; /* slips lift off the paper by tone */
+  --card-foreground: #211c18;
   --popover: #ffffff;
-  --popover-foreground: #0a0a0a;
-  --primary: #0a0a0a;
-  --primary-foreground: #ffffff;
-  --secondary: #f5f5f5;
-  --secondary-foreground: #0a0a0a;
-  --muted: #f5f5f5;
-  --muted-foreground: #6f6f6f;
-  --accent: #f0f0f0;
-  --accent-foreground: #0a0a0a;
-  --destructive: #dc2626;
-  --border: #e8e8e8;
-  --input: #e8e8e8;
-  --ring: rgba(10, 10, 10, 0.24);
-  --selection: rgba(10, 10, 10, 0.1);
-  --sidebar: #fafafa;
-  --disabled: #f0f0f0;
-  --disabled-foreground: #a8a8a8;
+  --popover-foreground: #211c18;
+  --primary: #211c18; /* ink — buttons stay crisp/legible */
+  --primary-foreground: #faf8f4;
+  --secondary: #f0ece4;
+  --secondary-foreground: #211c18;
+  --muted: #f0ece4;
+  --muted-foreground: #7c7264;
+  --accent: #efe8dd;
+  --accent-foreground: #211c18;
+  --destructive: #b4442f;
+  --border: #e7e0d3;
+  --input: #e7e0d3;
+  --ring: rgba(154, 106, 47, 0.4);
+  --selection: rgba(154, 106, 47, 0.14);
+  --sidebar: #f5f1ea;
+  --disabled: #efe8dd;
+  --disabled-foreground: #a89c8b;
+
+  /* Brass accent + sage semantic */
+  --brand: #9a6a2f;
+  --brand-foreground: #ffffff;
+  --brand-soft: #f3e8d6;
+  --success: #4f6f52;
+  --success-foreground: #ffffff;
+  --success-soft: #e6ede2;
+
   --radius: 0.625rem;
 
   --font-sans:
@@ -63,6 +75,12 @@
   --color-sidebar: var(--sidebar);
   --color-disabled: var(--disabled);
   --color-disabled-foreground: var(--disabled-foreground);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-soft: var(--brand-soft);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-soft: var(--success-soft);
 
   --font-sans: var(--font-sans);
   --font-display: var(--font-display);
@@ -174,6 +192,17 @@
   50% {
     transform: scaleY(1);
     opacity: 1;
+  }
+}
+@keyframes live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 var(--brand-soft);
+  }
+  70% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
   }
 }
 

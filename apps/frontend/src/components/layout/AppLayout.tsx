@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Outlet } from "@tanstack/react-router";
-import { LogOut, Menu, Phone, Users } from "lucide-react";
+import { LogOut, Menu, ScrollText, Users } from "lucide-react";
 
 import { PineMark } from "@/components/brand/PineMark";
 
@@ -11,7 +11,7 @@ import { PRODUCT_NAME } from "@/lib/config";
 import { CallSessionProvider, useCallSession } from "@/lib/call-session";
 
 const NAV = [
-  { label: "Console", to: "/", icon: Phone },
+  { label: "Call log", to: "/", icon: ScrollText },
   { label: "Staff", to: "/staff", icon: Users },
 ] as const;
 

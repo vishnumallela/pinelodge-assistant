@@ -1,9 +1,17 @@
-import { createContext, use, useEffect, useMemo, useState } from "react";
+import { createContext, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { useSession } from "@/lib/auth-client";
 import { fetchVoiceToken } from "@/lib/voice-token";
 import { useStaff } from "@/lib/staff";
+import {
+  createCall,
+  endCall as endCallApi,
+  putTranscript,
+  type TranscriptTurn,
+} from "@/lib/calls-api";
 import { useVoiceAgent, type UseVoiceAgentReturn } from "@/hooks/useVoiceAgent";
 import {
   AGENT_NAME,
@@ -14,9 +22,11 @@ import {
 } from "@/lib/receptionist-agent";
 
 /**
- * One call at a time: the browser plays the caller, Sarah answers over
- * Grok realtime voice. Her only tool is end_call — she announces who she is
- * redirecting the caller to, then hangs up once her audio finishes.
+ * One live call at a time. Starting a call creates a server record, the
+ * browser plays the caller while Sarah answers over Grok realtime voice, and
+ * completed turns stream to the server as the transcript. Ending the call
+ * (by Sarah's end_call, the End button, or leaving) locks the record and
+ * enqueues its summary — an ended call can never be reopened.
  */
 
 export interface FeedItem {
@@ -32,18 +42,33 @@ interface CallSession {
   userName: string;
   callerPrompts: string[];
   feed: FeedItem[];
-  startCall: () => void;
+  /** The call currently being conducted, if any. */
+  activeCallId: string | null;
+  startCall: () => Promise<void>;
   endCall: () => void;
   send: (text: string) => void;
 }
 
 const CallSessionContext = createContext<CallSession | null>(null);
 
+function toTranscript(feed: FeedItem[]): TranscriptTurn[] {
+  return feed.map((f) => ({
+    role: f.role === "assistant" ? ("assistant" as const) : ("caller" as const),
+    text: f.text,
+  }));
+}
+
 export function CallSessionProvider({ children }: { children: React.ReactNode }) {
   const { data: session } = useSession();
   const userName = session?.user.name ?? session?.user.email ?? "there";
+  const navigate = useNavigate();
+  const qc = useQueryClient();
 
   const [hangupRequested, setHangupRequested] = useState(false);
+  const [activeCallId, setActiveCallId] = useState<string | null>(null);
+  const activeCallIdRef = useRef<string | null>(null);
+  activeCallIdRef.current = activeCallId;
+  const finalizingRef = useRef(false);
 
   const tools = useMemo(
     () => buildReceptionistTools({ onEndCall: () => setHangupRequested(true) }),
@@ -81,39 +106,76 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     }
     return out;
   }, [agent.history]);
+  const feedRef = useRef<FeedItem[]>(feed);
+  feedRef.current = feed;
 
-  // Complete a requested hangup only after the assistant finishes speaking,
-  // with a hard cap in case audio events go missing.
-  // Deps are the specific flags — depending on the agent object would restart
-  // these timers on every state/history change (the 15s cap would never fire).
+  // Stream the transcript to the server as turns complete (active call only).
+  useEffect(() => {
+    const id = activeCallIdRef.current;
+    if (!id || feed.length === 0) return;
+    void putTranscript(id, toTranscript(feed)).catch(() => {
+      /* a later turn will retry the full transcript */
+    });
+  }, [feed]);
+
+  const finalize = useCallback(() => {
+    const id = activeCallIdRef.current;
+    if (finalizingRef.current) return;
+    finalizingRef.current = true;
+    setHangupRequested(false);
+    agent.disconnect();
+    setActiveCallId(null);
+    if (id) {
+      void (async () => {
+        try {
+          await endCallApi(id, toTranscript(feedRef.current));
+          void qc.invalidateQueries({ queryKey: ["calls"] });
+          void qc.invalidateQueries({ queryKey: ["call", id] });
+        } catch {
+          /* the record still exists; the list refresh will show its state */
+        } finally {
+          finalizingRef.current = false;
+        }
+      })();
+    } else {
+      finalizingRef.current = false;
+    }
+  }, [agent, qc]);
+  const finalizeRef = useRef(finalize);
+  finalizeRef.current = finalize;
+
+  // Sarah's end_call requests a hangup; finalize only once her audio has
+  // finished (and the caller isn't mid-interruption), with a hard cap.
   useEffect(() => {
     if (!hangupRequested) return;
     if (agent.isAgentSpeaking || agent.isAgentThinking || agent.isUserSpeaking) return;
-    const grace = window.setTimeout(() => {
-      setHangupRequested(false);
-      agent.disconnect();
-    }, 600);
+    const grace = window.setTimeout(() => finalizeRef.current(), 600);
     return () => window.clearTimeout(grace);
-    // Specific flags on purpose; the whole agent object would reset the timer.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    hangupRequested,
-    agent.isAgentSpeaking,
-    agent.isAgentThinking,
-    agent.isUserSpeaking,
-    agent.disconnect,
-  ]);
+  }, [hangupRequested, agent.isAgentSpeaking, agent.isAgentThinking, agent.isUserSpeaking]);
 
   useEffect(() => {
     if (!hangupRequested) return;
-    const cap = window.setTimeout(() => {
-      setHangupRequested(false);
-      agent.disconnect();
-    }, 15000);
+    const cap = window.setTimeout(() => finalizeRef.current(), 15000);
     return () => window.clearTimeout(cap);
-    // 15s hard cap must start exactly once per hangup — not restart on renders.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [hangupRequested, agent.disconnect]);
+  }, [hangupRequested]);
+
+  const startCall = useCallback(async () => {
+    if (activeCallIdRef.current) return;
+    try {
+      const call = await createCall();
+      finalizingRef.current = false;
+      setActiveCallId(call.id);
+      setHangupRequested(false);
+      void qc.invalidateQueries({ queryKey: ["calls"] });
+      await navigate({ to: "/calls/$callId", params: { callId: call.id } });
+      await agent.connect();
+    } catch (e) {
+      setActiveCallId(null);
+      toast.error(e instanceof Error ? e.message : "Could not start the call.");
+    }
+  }, [agent, navigate, qc]);
 
   const value = useMemo<CallSession>(
     () => ({
@@ -122,19 +184,14 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       userName,
       callerPrompts: CALLER_PROMPTS,
       feed,
-      startCall: () => {
-        setHangupRequested(false);
-        void agent.connect();
-      },
-      endCall: () => {
-        setHangupRequested(false);
-        agent.disconnect();
-      },
+      activeCallId,
+      startCall,
+      endCall: finalize,
       send: (text: string) => {
         if (agent.isConnected) agent.sendText(text);
       },
     }),
-    [agent, userName, feed],
+    [agent, userName, feed, activeCallId, startCall, finalize],
   );
 
   return <CallSessionContext.Provider value={value}>{children}</CallSessionContext.Provider>;

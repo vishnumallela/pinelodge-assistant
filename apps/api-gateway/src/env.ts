@@ -3,6 +3,15 @@ import { z } from "zod";
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 
+  // App database (calls, transcripts, summaries)
+  DATABASE_URL_APP: z
+    .string()
+    .min(1)
+    .default("postgres://pinelodge:pinelodge@localhost:5443/pinelodge_app"),
+
+  // Redis backing the BullMQ summarization queue
+  REDIS_URL: z.string().min(1).default("redis://localhost:6379"),
+
   // Auth service (identity lives there; we resolve sessions against it)
   BETTER_AUTH_URL: z.string().url().default("http://localhost:3001"),
 
@@ -23,6 +32,8 @@ const schema = z.object({
   // Pinned (not the -latest alias) so the model never migrates silently.
   GROK_REALTIME_MODEL: z.string().default("grok-voice-think-fast-1.0"),
   GROK_REALTIME_VOICE: z.string().default("ara"),
+  // Text model that writes the post-call summary (never the realtime model).
+  XAI_SUMMARY_MODEL: z.string().default("grok-4.3"),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -34,10 +45,13 @@ const raw = parsed.data;
 
 export const env = {
   NODE_ENV: raw.NODE_ENV,
+  DATABASE_URL: raw.DATABASE_URL_APP,
+  REDIS_URL: raw.REDIS_URL,
   AUTH_URL: raw.BETTER_AUTH_URL,
   PORT: raw.PORT ?? raw.API_PORT,
   ALLOWED_ORIGINS: raw.AUTH_TRUSTED_ORIGINS,
   XAI_API_KEY: raw.XAI_API_KEY,
   GROK_REALTIME_MODEL: raw.GROK_REALTIME_MODEL,
   GROK_REALTIME_VOICE: raw.GROK_REALTIME_VOICE,
+  XAI_SUMMARY_MODEL: raw.XAI_SUMMARY_MODEL,
 } as const;

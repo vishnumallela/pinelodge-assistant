@@ -10,7 +10,8 @@ import { queryClient } from "@/lib/query-client";
 import { sessionQuery } from "@/lib/session";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { NotFound, RouteError } from "@/components/layout/RouteFallbacks";
-import { HomePage } from "@/routes/home";
+import { LedgerPage } from "@/routes/ledger";
+import { CallPage } from "@/routes/call";
 import { StaffPage } from "@/routes/staff";
 import { LoginPage } from "@/routes/login";
 
@@ -40,7 +41,17 @@ const appRoute = createRoute({
   component: AppLayout,
 });
 
-const indexRoute = createRoute({ getParentRoute: () => appRoute, path: "/", component: HomePage });
+const indexRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/",
+  component: LedgerPage,
+});
+
+const callRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/calls/$callId",
+  component: CallPage,
+});
 
 const staffRoute = createRoute({
   getParentRoute: () => appRoute,
@@ -50,7 +61,7 @@ const staffRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
-  appRoute.addChildren([indexRoute, staffRoute]),
+  appRoute.addChildren([indexRoute, callRoute, staffRoute]),
 ]);
 
 export const router = createRouter({

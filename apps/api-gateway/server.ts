@@ -1,4 +1,11 @@
+import { createCall, endCall, getCall, listCalls, saveTranscript } from "./src/calls";
+import { ensureSchema } from "./src/db";
 import { env } from "./src/env";
+import { enqueueSummary, startSummaryWorker } from "./src/queue";
+import type { TranscriptTurn } from "./src/schema";
+
+await ensureSchema();
+startSummaryWorker();
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -13,7 +20,7 @@ function corsHeaders(origin: string | null): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": allow,
     "Access-Control-Allow-Credentials": "true",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
@@ -44,12 +51,9 @@ async function sessionUser(req: Request): Promise<{ id: string } | null> {
 }
 
 /** Mint a short-lived xAI realtime client secret so the browser can open a
- *  Grok voice WebSocket without ever seeing our standard API key. The session
- *  (voice, instructions, tools, VAD) is configured client-side via
- *  session.update after the socket opens. */
-async function mintVoiceToken(req: Request): Promise<Response> {
-  const user = await sessionUser(req);
-  if (!user) return json({ error: "Sign in to start a call." }, 401);
+ *  Grok voice WebSocket without ever seeing our standard API key. */
+async function mintVoiceToken(userId: string): Promise<Response> {
+  void userId;
   if (!env.XAI_API_KEY) {
     return json({ error: "XAI_API_KEY is not set. Add it to .env and restart." }, 500);
   }
@@ -69,7 +73,6 @@ async function mintVoiceToken(req: Request): Promise<Response> {
   } catch {
     /* ignore */
   }
-  // Response shapes have varied over time; accept the common ones.
   const candidate =
     (data.value as string | undefined) ??
     (data.secret as string | undefined) ??
@@ -78,11 +81,66 @@ async function mintVoiceToken(req: Request): Promise<Response> {
     (typeof data.client_secret === "string" ? data.client_secret : undefined);
   const token = String(candidate ?? "").replace(/^xai-client-secret\./, "");
   if (!token) return json({ error: "Could not parse token from provider." }, 502);
-  return json({
-    token,
-    model: env.GROK_REALTIME_MODEL,
-    voice: env.GROK_REALTIME_VOICE,
-  });
+  return json({ token, model: env.GROK_REALTIME_MODEL, voice: env.GROK_REALTIME_VOICE });
+}
+
+/** Coerce an arbitrary body into a clean transcript array. */
+function readTranscript(body: unknown): TranscriptTurn[] {
+  const raw = (body as { transcript?: unknown } | null)?.transcript;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((t) => {
+      const role = (t as { role?: unknown }).role;
+      const text = (t as { text?: unknown }).text;
+      return {
+        role: role === "assistant" ? ("assistant" as const) : ("caller" as const),
+        text: typeof text === "string" ? text : "",
+      };
+    })
+    .filter((t) => t.text.trim() !== "");
+}
+
+async function handleCalls(req: Request, userId: string, path: string): Promise<Response> {
+  // rest is "", "/:id", "/:id/transcript", or "/:id/end"
+  const rest = path.slice("/api/calls".length);
+  const segments = rest.split("/").filter(Boolean);
+
+  // /api/calls
+  if (segments.length === 0) {
+    if (req.method === "GET") return json({ calls: await listCalls(userId) });
+    if (req.method === "POST") return json({ call: await createCall(userId) }, 201);
+    return json({ error: "Method not allowed" }, 405);
+  }
+
+  const id = segments[0]!;
+  const sub = segments[1];
+
+  // /api/calls/:id
+  if (!sub) {
+    if (req.method === "GET") {
+      const call = await getCall(userId, id);
+      return call ? json({ call }) : json({ error: "Call not found" }, 404);
+    }
+    return json({ error: "Method not allowed" }, 405);
+  }
+
+  const body = await req.json().catch(() => ({}));
+
+  // /api/calls/:id/transcript
+  if (sub === "transcript" && req.method === "PUT") {
+    const ok = await saveTranscript(userId, id, readTranscript(body));
+    return ok ? json({ ok: true }) : json({ error: "Call is locked or not found" }, 409);
+  }
+
+  // /api/calls/:id/end
+  if (sub === "end" && req.method === "POST") {
+    const row = await endCall(userId, id, readTranscript(body));
+    if (!row) return json({ error: "Call is locked or not found" }, 409);
+    await enqueueSummary({ callId: row.id, userId });
+    return json({ call: row });
+  }
+
+  return json({ error: "Not found" }, 404);
 }
 
 const server = Bun.serve({
@@ -96,10 +154,21 @@ const server = Bun.serve({
 
     const path = new URL(req.url).pathname;
     let res: Response;
-    if (path === "/health") res = json({ ok: true, service: "api-gateway" });
-    else if (path === "/api/realtime/token" && req.method === "POST")
-      res = await mintVoiceToken(req);
-    else res = json({ error: "Not found" }, 404);
+
+    if (path === "/health") {
+      res = json({ ok: true, service: "api-gateway" });
+    } else {
+      const user = await sessionUser(req);
+      if (!user) {
+        res = json({ error: "Sign in to continue." }, 401);
+      } else if (path === "/api/realtime/token" && req.method === "POST") {
+        res = await mintVoiceToken(user.id);
+      } else if (path === "/api/calls" || path.startsWith("/api/calls/")) {
+        res = await handleCalls(req, user.id, path);
+      } else {
+        res = json({ error: "Not found" }, 404);
+      }
+    }
 
     return withCors(res, origin);
   },
