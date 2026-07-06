@@ -41,10 +41,11 @@ services:
     container_name: pinelodge-openobserve
     restart: unless-stopped
     environment:
-      ZO_ROOT_USER_EMAIL: admin@pinelodge.local
+      ZO_ROOT_USER_EMAIL: vishnu@stackaisolutions.com
       # OpenObserve enforces password complexity (upper+lower+digit+special)
-      # and refuses to boot otherwise.
-      ZO_ROOT_USER_PASSWORD: Observe1234!
+      # and refuses to boot otherwise, so this is admin "password1234" in the
+      # nearest form it accepts.
+      ZO_ROOT_USER_PASSWORD: Password1234!
       ZO_DATA_DIR: /data
     ports:
       - "5080:5080"
