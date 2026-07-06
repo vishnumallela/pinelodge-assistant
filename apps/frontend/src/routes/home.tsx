@@ -5,7 +5,6 @@ import { CallStatus } from "@/components/voice/CallChrome";
 import { SuggestionChips } from "@/components/voice/SuggestionChips";
 import { TranscriptPanel } from "@/components/voice/TranscriptPanel";
 import { CallHeader } from "@/components/voice/CallHeader";
-import { CallStatePanel } from "@/components/voice/CallStatePanel";
 import { Composer } from "@/components/voice/Composer";
 import { FACILITY_NAME } from "@/lib/config";
 
@@ -46,8 +45,8 @@ export function HomePage() {
             Incoming call console
           </h1>
           <p className="mx-auto max-w-md text-pretty text-[15px] leading-relaxed text-muted-foreground">
-            Start a simulated call to {FACILITY_NAME}. You are the caller; {agentName} answers,
-            gathers what the front desk needs, and routes the call.
+            Start a simulated call to {FACILITY_NAME}. You are the caller; {agentName} answers, asks
+            what you need, and redirects you to the right person.
           </p>
         </div>
         <div className="w-full max-w-3xl px-4 md:px-5">
@@ -115,7 +114,6 @@ export function HomePage() {
           </div>
         </div>
       </div>
-      {liveCall && <div className="hidden xl:flex">{<CallStatePanel call={liveCall} />}</div>}
     </main>
   );
 }

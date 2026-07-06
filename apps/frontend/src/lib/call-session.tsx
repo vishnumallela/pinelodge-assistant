@@ -19,8 +19,8 @@ import {
 /**
  * One simulated incoming call at a time. The browser plays the caller; Sarah
  * answers over WebRTC. Every completed turn is appended to the server-side
- * transcript, every tool invocation persists structured call state, and
- * hanging up finalizes the call and queues its report.
+ * transcript. Sarah's only tool is end_call: she announces who she is
+ * redirecting the caller to, then hangs up.
  */
 
 export type LiveCall = NonNullable<Awaited<ReturnType<typeof orpcClient.calls.get>>>;
@@ -73,25 +73,15 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const feedSeenRef = useRef<Set<string>>(new Set());
 
-  const refreshLiveCall = useCallback(() => {
-    const id = callIdRef.current;
-    if (id) void qc.invalidateQueries({ queryKey: orpc.calls.get.key({ input: { callId: id } }) });
-  }, [qc]);
-
   const endCallRef = useRef<() => void>(() => undefined);
 
-  // The assistant's end_call / complete_transfer request a hangup; we only
-  // disconnect once her audio has finished so goodbyes are never cut off.
+  // Sarah's end_call tool requests a hangup; we only disconnect once her
+  // audio has finished so the spoken redirect and goodbye are never cut off.
   const [hangupRequested, setHangupRequested] = useState(false);
 
   const tools = useMemo(
-    () =>
-      buildReceptionistTools({
-        getCallId: () => callIdRef.current,
-        onStateChange: refreshLiveCall,
-        onEndCall: () => setHangupRequested(true),
-      }),
-    [refreshLiveCall],
+    () => buildReceptionistTools({ onEndCall: () => setHangupRequested(true) }),
+    [],
   );
   const instructions = useMemo(() => buildInstructions(), []);
 
@@ -101,25 +91,13 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     tools,
     greeting: GREETING,
     transcriptionPrompt: TRANSCRIPTION_HINT,
-    onToolCall: ({ name }) =>
-      setFeed((f) => [...f, { kind: "tool", id: crypto.randomUUID(), name, status: "running" }]),
-    onToolResult: ({ name }) =>
-      setFeed((f) => {
-        const idx = f.findLastIndex(
-          (i) => i.kind === "tool" && i.name === name && i.status === "running",
-        );
-        if (idx === -1) return f;
-        const next = f.slice();
-        next[idx] = { ...(next[idx] as FeedItem & { kind: "tool" }), status: "done" };
-        return next;
-      }),
     onError: (m) => toast.error(m),
   });
 
-  // Fold newly completed turns into the feed, preserving arrival order
-  // relative to tool activity. The model sometimes splits one utterance
-  // across several output items in the same response — merge those into a
-  // single bubble, and drop a fragment that merely repeats the previous one.
+  // Fold newly completed turns into the feed, preserving arrival order.
+  // The model sometimes splits one utterance across several output items in
+  // the same response — merge those into a single bubble, and drop a fragment
+  // that merely repeats the previous one.
   useEffect(() => {
     const fresh = agent.history.filter(
       (h) => h.status === "completed" && h.text.trim() !== "" && !feedSeenRef.current.has(h.id),

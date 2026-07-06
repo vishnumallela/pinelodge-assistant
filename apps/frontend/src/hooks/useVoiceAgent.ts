@@ -22,8 +22,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const CALLS_ENDPOINT = "https://api.openai.com/v1/realtime/calls";
 const DEFAULT_MODEL = "gpt-realtime-2";
-const DEFAULT_VOICE = "shimmer";
-const DEFAULT_TRANSCRIBE_MODEL = "gpt-4o-transcribe";
+// marin/cedar are OpenAI's recommended best-quality voices.
+const DEFAULT_VOICE = "marin";
+const DEFAULT_TRANSCRIBE_MODEL = "whisper-1";
 
 /* ── public types ─────────────────────────────────────────────────────── */
 
@@ -250,8 +251,8 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
         audio: {
           input: {
             // Language pin (ISO-639-1) improves accuracy and latency per the
-            // API docs; the prompt supplies domain vocabulary so proper
-            // names transcribe correctly.
+            // API docs; the prompt supplies domain vocabulary (a keyword list
+            // for whisper-1) so proper names transcribe correctly.
             transcription: {
               model: cfg.transcribeModel,
               language: "en",
@@ -260,20 +261,17 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
             // Noise reduction is OFF by API default; without it, ambient
             // noise fires speech_started while the agent talks and the server
             // cancels her mid-word. far_field is the documented profile for
-            // laptop and room microphones (near_field is for headsets).
+            // laptop and room microphones (near_field is for headsets), and
+            // it filters the audio before it reaches VAD and the model.
             noise_reduction: { type: "far_field" },
             turn_detection: o.turnDetection ?? {
-              // Tuned for noisy rooms per the API's VAD guide (0.7-0.8
-              // threshold recommended; semantic_vad exposes no such knob —
-              // verified against gpt-realtime-2). 800ms of silence ends a
-              // turn, so mid-thought pauses survive; after 10s of caller
-              // silence the model re-engages instead of dead air. Barge-in
-              // stays on — it just takes actual speech, not chatter.
-              type: "server_vad",
-              threshold: 0.7,
-              prefix_padding_ms: 300,
-              silence_duration_ms: 800,
-              idle_timeout_ms: 10000,
+              // Semantic VAD ends the user's turn from meaning, not a fixed
+              // silence window: trailing "uhm…" keeps the turn open, and a
+              // finished sentence responds without the dead-air wait. auto
+              // (= medium) balances patience and latency; far_field noise
+              // reduction upstream keeps room noise from tripping barge-in.
+              type: "semantic_vad",
+              eagerness: "auto",
               create_response: true,
               interrupt_response: true,
             },

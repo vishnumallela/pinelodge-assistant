@@ -29,8 +29,8 @@ const schema = z.object({
   // post-call report (never the realtime model).
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_REALTIME_MODEL: z.string().default("gpt-realtime-2"),
-  OPENAI_REALTIME_VOICE: z.string().default("shimmer"),
-  OPENAI_TRANSCRIBE_MODEL: z.string().default("gpt-4o-transcribe"),
+  OPENAI_REALTIME_VOICE: z.string().default("marin"),
+  OPENAI_TRANSCRIBE_MODEL: z.string().default("whisper-1"),
   OPENAI_SUMMARY_MODEL: z.string().default("gpt-5-mini"),
 
   // Facility identity
