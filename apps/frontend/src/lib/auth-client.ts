@@ -1,11 +1,9 @@
 import { createAuthClient } from "better-auth/react";
-import { usernameClient } from "better-auth/client/plugins";
 import { env } from "./env";
 import { BEARER_KEY } from "./bearer";
 
-export const authClient = createAuthClient({
+const authClient = createAuthClient({
   baseURL: env.AUTH_URL,
-  plugins: [usernameClient()],
   fetchOptions: {
     credentials: "include",
     onSuccess: (ctx) => {
@@ -19,4 +17,4 @@ export const authClient = createAuthClient({
   },
 });
 
-export const { signIn, signUp, signOut, useSession, getSession } = authClient;
+export const { signIn, signOut, useSession, getSession } = authClient;

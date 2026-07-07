@@ -21,7 +21,6 @@
     "@orpc/server": "^1.14.7",
     "bullmq": "^5.34.0",
     "drizzle-orm": "^0.38.0",
-    "ioredis": "^5.4.1",
     "postgres": "^3.4.5",
     "zod": "^3.24.0"
   },

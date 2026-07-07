@@ -3,8 +3,6 @@ import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const Sheet = SheetPrimitive.Root;
-export const SheetTrigger = SheetPrimitive.Trigger;
-export const SheetClose = SheetPrimitive.Close;
 
 export function SheetContent({
   className,

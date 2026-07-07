@@ -11,5 +11,3 @@ export const sessionQuery = queryOptions({
   queryFn: fetchSession,
   staleTime: 30_000,
 });
-
-export type Session = Awaited<ReturnType<typeof fetchSession>>;

@@ -21,18 +21,14 @@ export const orpc = createTanstackQueryUtils(client);
 
 /* Types inferred straight from the router — the server is the source of
  * truth (dates arrive as real Date objects over the oRPC serializer). */
-export type CallsPage = Awaited<ReturnType<typeof client.calls.list>>;
 export type Call = Awaited<ReturnType<typeof client.calls.get>>;
 export type CallStatus = Call["status"];
-export type CallSummary = NonNullable<Call["summary"]>;
-export type CallEvent = Call["events"][number];
 export type TranscriptTurn = Call["transcript"][number];
 export type StaffMember = Awaited<ReturnType<typeof client.staff.list>>[number];
 type StaffCreateInput = Parameters<typeof client.staff.create>[0];
 /** Editor form shape: the zod defaults are optional on the wire, but the
  *  form always carries concrete values. */
 export type StaffInput = Required<Omit<StaffCreateInput, "sort">> & Pick<StaffCreateInput, "sort">;
-export type AgentPrompt = Awaited<ReturnType<typeof client.prompt.get>>;
 export type PhoneConfig = Awaited<ReturnType<typeof client.phone.config>>;
 
 /** Human label for where a call came from. */

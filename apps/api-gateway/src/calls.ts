@@ -14,10 +14,6 @@ export async function createCall(source: string): Promise<CallRow> {
   return row!;
 }
 
-export function listCalls(): Promise<CallRow[]> {
-  return db.select().from(calls).orderBy(desc(calls.createdAt));
-}
-
 /** Newest-first page of the log plus the total, for server-side pagination. */
 export async function listCallsPage(
   page: number,

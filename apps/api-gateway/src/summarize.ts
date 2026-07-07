@@ -25,7 +25,7 @@ function str(v: unknown): string {
 }
 
 /** Tolerant parser so a malformed reply still yields a usable summary. */
-export function parseSummary(raw: string): CallSummary {
+function parseSummary(raw: string): CallSummary {
   let obj: Record<string, unknown> = {};
   const start = raw.indexOf("{");
   const end = raw.lastIndexOf("}");

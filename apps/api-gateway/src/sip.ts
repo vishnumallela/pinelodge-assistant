@@ -67,7 +67,7 @@ export function listRegisteredNumbers(): Promise<RegisteredNumber[] | null> {
 }
 
 /** Standard-Webhooks signature check: HMAC-SHA256 over "id.timestamp.body". */
-export function verifySipSignature(headers: Headers, rawBody: string, secretRaw: string): boolean {
+function verifySipSignature(headers: Headers, rawBody: string, secretRaw: string): boolean {
   if (!secretRaw) return false;
   const id = headers.get("webhook-id");
   const timestamp = headers.get("webhook-timestamp");

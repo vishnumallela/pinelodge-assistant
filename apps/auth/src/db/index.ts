@@ -1,6 +1,6 @@
 import { db, sql } from "./client";
 
-export { db, sql };
+export { db };
 export * as schema from "./schema";
 
 /** Idempotent schema init so the auth service runs one-command after db:up. */

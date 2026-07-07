@@ -15,7 +15,7 @@ const QUEUE_NAME = "call-summaries";
 // BullMQ needs maxRetriesPerRequest: null on the shared connection.
 const connection: ConnectionOptions = { url: env.REDIS_URL, maxRetriesPerRequest: null };
 
-export const summaryQueue = new Queue(QUEUE_NAME, { connection });
+const summaryQueue = new Queue(QUEUE_NAME, { connection });
 
 interface SummarizeJob {
   callId: string;

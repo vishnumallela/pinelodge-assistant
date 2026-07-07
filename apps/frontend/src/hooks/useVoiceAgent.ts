@@ -60,9 +60,9 @@ export interface UseVoiceAgentOptions {
   onError?: (message: string) => void;
 }
 
-export type VoiceStatus = "idle" | "connecting" | "connected" | "error" | "closed";
+type VoiceStatus = "idle" | "connecting" | "connected" | "error" | "closed";
 
-export interface VoiceHistoryItem {
+interface VoiceHistoryItem {
   id: string;
   role: "user" | "assistant";
   text: string;

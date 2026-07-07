@@ -45,7 +45,7 @@ function takePendingTransfer(rowId: string): TransferTarget | null {
 }
 
 /** Twilio request validation: base64(HMAC-SHA1(authToken, url + sorted params)). */
-export function verifyTwilioSignature(
+function verifyTwilioSignature(
   url: string,
   params: URLSearchParams,
   signature: string | null,

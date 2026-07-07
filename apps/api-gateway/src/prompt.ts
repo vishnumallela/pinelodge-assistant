@@ -52,11 +52,11 @@ async function putSetting(key: string, value: unknown): Promise<void> {
     .onConflictDoUpdate({ target: settings.key, set: { value } });
 }
 
-export function getTemplate(): Promise<string> {
+function getTemplate(): Promise<string> {
   return getSetting("prompt_template", DEFAULT_TEMPLATE);
 }
 
-export function getGreeting(): Promise<string> {
+function getGreeting(): Promise<string> {
   return getSetting("greeting", DEFAULT_GREETING);
 }
 
@@ -65,7 +65,7 @@ export async function saveTemplate(template: string, greeting: string): Promise<
   await putSetting("greeting", greeting);
 }
 
-export function renderPrompt(
+function renderPrompt(
   template: string,
   greeting: string,
   staffRows: StaffWithAvailability[],

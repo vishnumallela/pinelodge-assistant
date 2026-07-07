@@ -79,7 +79,7 @@ function toMinutes(hhmm: string): number {
   return h * 60 + m;
 }
 
-export function isAvailable(row: StaffRow, now = new Date()): boolean {
+function isAvailable(row: StaffRow, now = new Date()): boolean {
   if (!row.active) return false;
   const t = facilityNow(now);
   if (!row.days.includes(t.day)) return false;
@@ -109,41 +109,6 @@ export interface StaffInput {
   isFallback: boolean;
   active: boolean;
   sort?: number;
-}
-
-const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
-const YMD = /^\d{4}-\d{2}-\d{2}$/;
-const E164 = /^\+[1-9]\d{6,14}$/;
-
-/** Validate + coerce an arbitrary body; returns null when unusable. */
-export function readStaffInput(body: unknown): StaffInput | null {
-  const b = body as Record<string, unknown> | null;
-  if (!b || typeof b.name !== "string" || typeof b.section !== "string") return null;
-  const name = b.name.trim();
-  const section = b.section.trim();
-  if (!name || !section) return null;
-  const days = Array.isArray(b.days)
-    ? [...new Set(b.days.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))]
-    : [1, 2, 3, 4, 5];
-  const startTime =
-    typeof b.startTime === "string" && HHMM.test(b.startTime) ? b.startTime : "09:00";
-  const endTime = typeof b.endTime === "string" && HHMM.test(b.endTime) ? b.endTime : "17:00";
-  const timeOff = Array.isArray(b.timeOff)
-    ? b.timeOff.filter((d): d is string => typeof d === "string" && YMD.test(d))
-    : [];
-  return {
-    name,
-    section,
-    handles: typeof b.handles === "string" ? b.handles.trim() : "",
-    phone: typeof b.phone === "string" && E164.test(b.phone.trim()) ? b.phone.trim() : "",
-    days,
-    startTime,
-    endTime,
-    timeOff,
-    isFallback: b.isFallback === true,
-    active: b.active !== false,
-    sort: typeof b.sort === "number" ? b.sort : undefined,
-  };
 }
 
 export interface TransferTarget {

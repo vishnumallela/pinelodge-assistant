@@ -19,7 +19,7 @@ interface ObserveRecord {
 const queues = new Map<string, ObserveRecord[]>();
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
-export function observeEnabled(): boolean {
+function observeEnabled(): boolean {
   return Boolean(env.OBSERVE_URL && env.OBSERVE_USER && env.OBSERVE_PASSWORD);
 }
 
