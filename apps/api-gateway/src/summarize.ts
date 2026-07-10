@@ -12,6 +12,7 @@ const SYSTEM = [
   "You are a front-desk supervisor at an assisted living community writing up a phone call for the record.",
   "You are given the full transcript between the receptionist (Sarah) and a caller.",
   "Write a tight, factual summary a colleague can skim. Never invent details not in the transcript.",
+  "Use plain punctuation: never use em dashes.",
   "Reply with ONLY a JSON object, no prose, with these string fields:",
   '- "headline": one sentence capturing who called and what happened.',
   '- "caller": who the caller is and what they wanted (or "Unknown" if unclear).',
@@ -94,6 +95,7 @@ function transferSystem(targetName: string, targetSection: string): string {
     "You are the front desk receptionist at an assisted living community.",
     `You are transferring a LIVE caller to your colleague ${targetName} in ${targetSection} RIGHT NOW, and you are writing them a one-glance brief so they pick up the phone already knowing the situation.`,
     "You are given the transcript so far between the receptionist (Sarah) and the caller. Never invent details not in the transcript.",
+    "Use plain punctuation: never use em dashes.",
     "Reply with ONLY a JSON object, no prose, with these string fields:",
     '- "headline": one sentence: who is calling and why they are being transferred.',
     '- "caller": who the caller is and what they want (or "Unknown" if unclear).',
@@ -123,7 +125,7 @@ export function fallbackTransferBrief(
     .map((t) => `${t.role === "assistant" ? "Sarah" : "Caller"}: ${t.text}`.slice(0, 200));
   return {
     headline: "Live call transferred to you (automatic summary unavailable).",
-    caller: firstCaller ? firstCaller.text.slice(0, 200) : "Unknown — see the call log.",
+    caller: firstCaller ? firstCaller.text.slice(0, 200) : "Unknown; see the call log.",
     keyPoints: recent.length > 0 ? recent : ["No speech was transcribed before the transfer."],
     outcome: `Sarah redirected the caller to ${target.name} in ${target.section}.`,
     followUp: "The key points above are the call's last turns, verbatim.",

@@ -62,6 +62,9 @@ const schema = z.object({
   // type") but accepts LOGIN, which nearly every relay also supports.
   SMTP_AUTH_METHOD: z.enum(["login", "plain"]).default("login"),
   EMAIL_FROM: z.string().optional(),
+  // Dashboard origin for links inside emails; falls back to the first
+  // trusted origin when unset.
+  APP_URL: z.string().url().optional(),
 
   // Observability sink (optional): OpenObserve-compatible JSON ingest. Call
   // events and errors ship here when all three are set.
@@ -100,6 +103,7 @@ export const env = {
   SMTP_PASS: raw.SMTP_PASS,
   SMTP_AUTH_METHOD: raw.SMTP_AUTH_METHOD,
   EMAIL_FROM: raw.EMAIL_FROM,
+  APP_URL: raw.APP_URL?.replace(/\/$/, ""),
   OBSERVE_URL: raw.OBSERVE_URL?.replace(/\/$/, ""),
   OBSERVE_ORG: raw.OBSERVE_ORG,
   OBSERVE_USER: raw.OBSERVE_USER,

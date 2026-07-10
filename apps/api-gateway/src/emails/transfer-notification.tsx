@@ -118,8 +118,8 @@ export function TransferNotification({
             }}
           >
             <Text style={{ ...value, marginBottom: "20px" }}>
-              Hi {staffName} — Sarah, the front desk assistant, just redirected a live call to you.
-              Here is what was said before the handoff.
+              Hi {staffName}, Sarah just redirected a live call to you. Here is what was said before
+              the handoff.
             </Text>
 
             <Section
@@ -226,7 +226,7 @@ TransferNotification.PreviewProps = {
       "She has already spoken to the bank; they directed her back to the facility.",
     ],
     outcome: "Billing questions are yours, so Sarah told her you would take the call.",
-    followUp: "Pull up the Holmes account before greeting her — she has the invoice in hand.",
+    followUp: "Pull up the Holmes account before greeting her; she has the invoice in hand.",
   },
   sourceLabel: "Console call",
   transferredAtLabel: "2:41 PM CDT",

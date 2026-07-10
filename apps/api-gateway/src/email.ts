@@ -64,12 +64,32 @@ function facilityTimeLabel(at: Date): string {
   }).format(at);
 }
 
+/** Email copy stays plain: em dashes become commas, en dashes hyphens. */
+function cleanText(s: string): string {
+  return s
+    .replaceAll(/\s*—\s*/g, ", ")
+    .replaceAll("–", "-")
+    .replace(/^, /, "")
+    .trim();
+}
+
+function cleanSummary(s: CallSummary): CallSummary {
+  return {
+    headline: cleanText(s.headline),
+    caller: cleanText(s.caller),
+    keyPoints: s.keyPoints.map(cleanText),
+    outcome: cleanText(s.outcome),
+    followUp: cleanText(s.followUp),
+  };
+}
+
 export async function sendTransferEmail(input: TransferEmailInput): Promise<void> {
-  const origin = env.ALLOWED_ORIGINS[0];
+  const origin = env.APP_URL ?? env.ALLOWED_ORIGINS[0];
+  const summary = cleanSummary(input.summary);
   const { html, text } = await renderTransferEmail({
     staffName: input.staffName,
     facilityName: env.FACILITY_NAME,
-    summary: input.summary,
+    summary,
     sourceLabel: input.sourceLabel,
     transferredAtLabel: facilityTimeLabel(input.transferredAt),
     ...(origin ? { callUrl: `${origin}/calls/${input.callId}` } : {}),
@@ -77,7 +97,7 @@ export async function sendTransferEmail(input: TransferEmailInput): Promise<void
   await getClient().send({
     from: env.EMAIL_FROM!,
     to: input.to,
-    subject: `Call transfer: ${input.summary.headline}`,
+    subject: `Call transfer: ${summary.headline}`,
     html,
     text,
   });
