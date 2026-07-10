@@ -196,7 +196,14 @@ export function TransferNotification({
               Transferred at {transferredAtLabel} &middot; {sourceLabel}
             </Text>
             <Text style={{ margin: "4px 0 0", fontSize: "12px", color: palette.faint }}>
-              Sent automatically by the {facilityName} reception assistant.
+              Sent automatically by the {facilityName} front desk assistant. Powered by{" "}
+              <Link
+                href="https://stackaisolutions.com"
+                style={{ color: palette.faint, textDecoration: "underline" }}
+              >
+                StackAI Solutions
+              </Link>
+              .
             </Text>
           </Section>
         </Container>
