@@ -20,7 +20,7 @@ const schema = z.object({
   ADMIN_EMAIL: z.string().email().default("vishnu@stackaisolutions.com"),
   ADMIN_EMAILS: z
     .string()
-    .default("ravi@stackaisolutions.com")
+    .default("ravi@stackaisolutions.com,ashok@theranow.com")
     .transform((s) =>
       s
         .split(",")
