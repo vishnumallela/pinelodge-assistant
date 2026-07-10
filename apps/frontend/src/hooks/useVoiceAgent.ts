@@ -35,6 +35,75 @@ const PREBUFFER_MAX_CHUNKS = 150;
 /** Drop mic frames rather than queue them on a congested socket. */
 const BACKPRESSURE_BYTES = 64 * 1024;
 
+/* ── tunable session config ───────────────────────────────────────────────
+ * The knobs that shape a call — model, voice, reasoning depth, VAD turn
+ * detection, playback speed. Everything here is UI-tunable (see
+ * VoiceSettingsProvider); the hook snapshots the config at connect() so a
+ * reconnect resumes with the exact settings the call started with.
+ */
+
+export type ReasoningEffort = "high" | "none";
+
+/** Grok voice models. Only -latest and -think-fast support reasoning. */
+export const VOICE_MODELS = [
+  "grok-voice-latest",
+  "grok-voice-think-fast-1.0",
+  "grok-voice-fast-1.0",
+] as const;
+
+/** Built-in xAI voices (GET /v1/tts/voices); a custom voice id also works. */
+export const BUILTIN_VOICES = ["ara", "eve", "leo", "rex", "sal"] as const;
+
+export function modelSupportsReasoning(model: string): boolean {
+  return model === "grok-voice-latest" || model === "grok-voice-think-fast-1.0";
+}
+
+export interface VoiceTurnDetection {
+  /** VAD sensitivity, 0–1. Higher = needs louder speech to trigger. */
+  threshold: number;
+  /** Silence after speech before the turn is committed. */
+  silenceDurationMs: number;
+  /** Audio kept before detected speech, so onsets aren't clipped. */
+  prefixPaddingMs: number;
+  /** Idle time before the server generates a proactive check-in. */
+  idleTimeoutMs: number;
+}
+
+export interface VoiceSessionConfig {
+  model?: string;
+  voice?: string;
+  reasoningEffort?: ReasoningEffort;
+  turnDetection?: VoiceTurnDetection;
+  /** Assistant playback speed multiplier (1.0 = normal). */
+  outputSpeed?: number;
+}
+
+export const DEFAULT_TURN_DETECTION: VoiceTurnDetection = {
+  threshold: 0.6,
+  silenceDurationMs: 300,
+  prefixPaddingMs: 300,
+  idleTimeoutMs: 15000,
+};
+
+export const DEFAULT_VOICE_SESSION_CONFIG: Required<VoiceSessionConfig> = {
+  model: DEFAULT_MODEL,
+  voice: DEFAULT_VOICE,
+  reasoningEffort: "none",
+  turnDetection: DEFAULT_TURN_DETECTION,
+  outputSpeed: 1.0,
+};
+
+/** Fill any missing field from defaults so partial configs are safe to use. */
+function resolveSessionConfig(cfg: VoiceSessionConfig | undefined): Required<VoiceSessionConfig> {
+  return {
+    model: cfg?.model || DEFAULT_VOICE_SESSION_CONFIG.model,
+    voice: cfg?.voice || DEFAULT_VOICE_SESSION_CONFIG.voice,
+    reasoningEffort: cfg?.reasoningEffort ?? DEFAULT_VOICE_SESSION_CONFIG.reasoningEffort,
+    turnDetection: { ...DEFAULT_TURN_DETECTION, ...cfg?.turnDetection },
+    outputSpeed: cfg?.outputSpeed ?? DEFAULT_VOICE_SESSION_CONFIG.outputSpeed,
+  };
+}
+
 export interface VoiceFunctionTool {
   type: "function";
   name: string;
@@ -57,6 +126,8 @@ export interface UseVoiceAgentOptions {
   tools?: VoiceFunctionTool[];
   /** Spoken verbatim by the server (force_message) as the call opens. */
   greeting?: string;
+  /** UI-tunable session knobs; snapshotted per call. Missing fields default. */
+  sessionConfig?: VoiceSessionConfig;
   onError?: (message: string) => void;
 }
 
@@ -262,6 +333,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
   const responseActiveRef = useRef(false);
   const pendingToolResponseRef = useRef(false);
   const voiceRef = useRef(DEFAULT_VOICE);
+  const sessionConfigRef = useRef<Required<VoiceSessionConfig>>(DEFAULT_VOICE_SESSION_CONFIG);
   const instructionsRef = useRef<string | undefined>(undefined);
   const greetingRef = useRef<string | undefined>(undefined);
   const greetingSentRef = useRef(false);
@@ -372,48 +444,49 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
     if (configSentRef.current) return;
     configSentRef.current = true;
     const o = optsRef.current;
-    sendEvent({
-      type: "session.update",
-      session: {
-        type: "realtime",
-        voice: voiceRef.current,
-        // Snapshotted at connect() so a reconnect resumes with the exact
-        // prompt the call started with.
-        instructions: instructionsRef.current ?? "You are a helpful voice assistant.",
-        // Extended reasoning defaults on and costs ~0.5s time-to-first-audio;
-        // a single-tool receptionist doesn't need it.
-        reasoning: { effort: "none" },
-        turn_detection: {
-          type: "server_vad",
-          threshold: 0.6,
-          silence_duration_ms: 300,
-          prefix_padding_ms: 300,
-          idle_timeout_ms: 15000,
-        },
-        resumption: { enabled: true },
-        audio: {
-          input: {
-            format: { type: "audio/pcm", rate: ctxRateRef.current },
-            transcription: { model: "grok-transcribe" },
-          },
-          output: {
-            // Always 24 kHz from the server; the fallback path resamples
-            // locally to the context rate on enqueue.
-            format: { type: "audio/pcm", rate: TARGET_RATE },
-            speed: 1.0,
-          },
-        },
-        tools: (o.tools ?? []).map((t) => ({
-          type: "function",
-          name: t.name,
-          description: t.description,
-          parameters: t.parameters,
-        })),
-        // Server drops transcribed input that matches what the agent just
-        // said — a second line of defence against echo re-triggering VAD.
-        enable_echo_detection_filtering: true,
+    const cfg = sessionConfigRef.current;
+    const session: Record<string, unknown> = {
+      type: "realtime",
+      voice: voiceRef.current,
+      // Snapshotted at connect() so a reconnect resumes with the exact
+      // prompt the call started with.
+      instructions: instructionsRef.current ?? "You are a helpful voice assistant.",
+      turn_detection: {
+        type: "server_vad",
+        threshold: cfg.turnDetection.threshold,
+        silence_duration_ms: cfg.turnDetection.silenceDurationMs,
+        prefix_padding_ms: cfg.turnDetection.prefixPaddingMs,
+        idle_timeout_ms: cfg.turnDetection.idleTimeoutMs,
       },
-    });
+      resumption: { enabled: true },
+      audio: {
+        input: {
+          format: { type: "audio/pcm", rate: ctxRateRef.current },
+          transcription: { model: "grok-transcribe" },
+        },
+        output: {
+          // Always 24 kHz from the server; the fallback path resamples
+          // locally to the context rate on enqueue.
+          format: { type: "audio/pcm", rate: TARGET_RATE },
+          speed: cfg.outputSpeed,
+        },
+      },
+      tools: (o.tools ?? []).map((t) => ({
+        type: "function",
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters,
+      })),
+      // Server drops transcribed input that matches what the agent just
+      // said — a second line of defence against echo re-triggering VAD.
+      enable_echo_detection_filtering: true,
+    };
+    // Extended reasoning defaults on and costs ~0.5s time-to-first-audio; only
+    // sent for models that support it (the fast model has no reasoning stage).
+    if (modelSupportsReasoning(cfg.model)) {
+      session.reasoning = { effort: cfg.reasoningEffort };
+    }
+    sendEvent({ type: "session.update", session });
     // Scripted greeting: the server TTS-speaks a force_message verbatim with
     // zero model latency; exactly once per call, never on reconnect.
     const greeting = greetingRef.current;
@@ -806,8 +879,10 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
       configSentRef.current = false;
       const key = tokenInfo.token;
       const proto = key.startsWith("xai-client-secret.") ? key : `xai-client-secret.${key}`;
-      const model = tokenInfo.model ?? DEFAULT_MODEL;
-      const params = new URLSearchParams({ model, "reasoning.effort": "none" });
+      const cfg = sessionConfigRef.current;
+      const model = cfg.model || tokenInfo.model || DEFAULT_MODEL;
+      const params = new URLSearchParams({ model });
+      if (modelSupportsReasoning(model)) params.set("reasoning.effort", cfg.reasoningEffort);
       if (conversationIdRef.current) params.set("conversation_id", conversationIdRef.current);
       const ws = new WebSocket(`${WS_ENDPOINT}?${params.toString()}`, [proto]);
       wsRef.current = ws;
@@ -880,6 +955,10 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
       // prompt (availability-dependent) right before connecting.
       instructionsRef.current = overrides?.instructions ?? optsRef.current.instructions;
       greetingRef.current = overrides?.greeting ?? optsRef.current.greeting;
+      // Snapshot the tunable session config so a reconnect (openSocket runs
+      // again) uses the exact model/voice/VAD the call started with.
+      sessionConfigRef.current = resolveSessionConfig(optsRef.current.sessionConfig);
+      voiceRef.current = sessionConfigRef.current.voice;
 
       try {
         // Token and audio pipeline in parallel — the mic buffers locally until
@@ -909,7 +988,11 @@ export function useVoiceAgent(options: UseVoiceAgentOptions): UseVoiceAgentRetur
           );
           return;
         }
-        voiceRef.current = tokenResult.value.voice ?? DEFAULT_VOICE;
+        // Voice is driven by the UI-tunable config (set above); the token's
+        // env-provided voice is only a fallback when the config left it unset.
+        if (!optsRef.current.sessionConfig?.voice && tokenResult.value.voice) {
+          voiceRef.current = tokenResult.value.voice;
+        }
         openSocket(myGen, tokenResult.value);
       } finally {
         connectingRef.current = false;
