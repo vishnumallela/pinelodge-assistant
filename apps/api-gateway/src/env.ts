@@ -76,13 +76,6 @@ const schema = z.object({
   // Dashboard origin for links inside emails; falls back to the first
   // trusted origin when unset.
   APP_URL: z.string().url().optional(),
-
-  // Observability sink (optional): OpenObserve-compatible JSON ingest. Call
-  // events and errors ship here when all three are set.
-  OBSERVE_URL: z.string().url().optional(),
-  OBSERVE_ORG: z.string().default("default"),
-  OBSERVE_USER: z.string().optional(),
-  OBSERVE_PASSWORD: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -115,8 +108,4 @@ export const env = {
   SMTP_AUTH_METHOD: raw.SMTP_AUTH_METHOD,
   EMAIL_FROM: raw.EMAIL_FROM,
   APP_URL: raw.APP_URL?.replace(/\/$/, ""),
-  OBSERVE_URL: raw.OBSERVE_URL?.replace(/\/$/, ""),
-  OBSERVE_ORG: raw.OBSERVE_ORG,
-  OBSERVE_USER: raw.OBSERVE_USER,
-  OBSERVE_PASSWORD: raw.OBSERVE_PASSWORD,
 } as const;

@@ -1,6 +1,5 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "./db";
-import { ship } from "./observability";
 import { calls, type CallRow, type CallSummary, type TranscriptTurn } from "./schema";
 
 /**
@@ -41,7 +40,6 @@ export async function getCall(id: string): Promise<CallRow | null> {
  *  service log. */
 export async function logCallEvent(id: string, event: string, detail?: string): Promise<void> {
   console.log(`[call ${id.slice(0, 8)}] ${event}${detail ? `: ${detail}` : ""}`);
-  ship("call_events", { call_id: id, event, detail: detail ?? "" });
   const entry = { at: new Date().toISOString(), event, ...(detail ? { detail } : {}) };
   try {
     await db

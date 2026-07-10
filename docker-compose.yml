@@ -34,24 +34,6 @@ services:
       timeout: 5s
       retries: 10
 
-  # Voice observability: call events + errors ship here (see OBSERVE_* envs).
-  # UI at http://localhost:5080 with the credentials below.
-  openobserve:
-    image: public.ecr.aws/zinclabs/openobserve:latest
-    container_name: pinelodge-openobserve
-    restart: unless-stopped
-    environment:
-      ZO_ROOT_USER_EMAIL: vishnu@stackaisolutions.com
-      # OpenObserve enforces password complexity (upper+lower+digit+special)
-      # and refuses to boot otherwise, so this is admin "password1234" in the
-      # nearest form it accepts.
-      ZO_ROOT_USER_PASSWORD: Password1234!
-      ZO_DATA_DIR: /data
-    ports:
-      - "5080:5080"
-    volumes:
-      - openobserve_data:/data
-
   postgres-auth:
     image: postgres:17-alpine
     container_name: pinelodge-postgres-auth
@@ -129,4 +111,3 @@ volumes:
   postgres_app_data:
   postgres_auth_data:
   redis_data:
-  openobserve_data:
