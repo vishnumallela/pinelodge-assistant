@@ -58,6 +58,9 @@ const schema = z.object({
     .transform((v) => v === "true" || v === "1"),
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
+  // AUTH mechanism: Office 365 rejects PLAIN ("504 unrecognized authentication
+  // type") but accepts LOGIN, which nearly every relay also supports.
+  SMTP_AUTH_METHOD: z.enum(["login", "plain"]).default("login"),
   EMAIL_FROM: z.string().optional(),
 
   // Observability sink (optional): OpenObserve-compatible JSON ingest. Call
@@ -95,6 +98,7 @@ export const env = {
   SMTP_SECURE: raw.SMTP_SECURE,
   SMTP_USER: raw.SMTP_USER,
   SMTP_PASS: raw.SMTP_PASS,
+  SMTP_AUTH_METHOD: raw.SMTP_AUTH_METHOD,
   EMAIL_FROM: raw.EMAIL_FROM,
   OBSERVE_URL: raw.OBSERVE_URL?.replace(/\/$/, ""),
   OBSERVE_ORG: raw.OBSERVE_ORG,

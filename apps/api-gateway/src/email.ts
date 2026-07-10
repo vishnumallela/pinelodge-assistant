@@ -28,7 +28,13 @@ function getClient(): ReturnType<typeof createEmailClient> {
           // STARTTLS port, insist on the upgrade whenever auth is configured.
           requireTLS: Boolean(!env.SMTP_SECURE && env.SMTP_USER && env.SMTP_PASS),
           ...(env.SMTP_USER && env.SMTP_PASS
-            ? { auth: { user: env.SMTP_USER, pass: env.SMTP_PASS } }
+            ? {
+                auth: {
+                  user: env.SMTP_USER,
+                  pass: env.SMTP_PASS,
+                  method: env.SMTP_AUTH_METHOD,
+                },
+              }
             : {}),
         }),
       ],
