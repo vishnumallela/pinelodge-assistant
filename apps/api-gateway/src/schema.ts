@@ -26,7 +26,7 @@ export interface CallEvent {
 
 export const calls = pgTable("calls", {
   id: uuid("id").primaryKey().defaultRandom(),
-  /** Call source: "console", "phone:+1…", or "sip:+1…". */
+  /** Call source: "console" or "phone:+1…" ("sip:+1…" on legacy rows). */
   userId: text("user_id").notNull(),
   status: text("status").$type<CallStatus>().notNull().default("active"),
   transcript: jsonb("transcript").$type<TranscriptTurn[]>().notNull().default([]),

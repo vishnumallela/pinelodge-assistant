@@ -11,10 +11,11 @@ model. Staff, schedules, and the agent prompt itself are all editable in the UI.
 ```
 apps/
   frontend       Vite + React — call log, live console, staff scheduling,
-                 prompt editor, SIP setup (shadcn components + TanStack Table)
+                 prompt editor, phone setup (shadcn components + TanStack Table)
   auth           Better Auth — console sign-in (Postgres)
   api-gateway    Bun — sessions, xAI secrets, calls + staff + settings
-                 (Postgres), BullMQ summaries (Redis), SIP webhook + agent
+                 (Postgres), BullMQ summaries + transfer briefs (Redis),
+                 Twilio bridge webhook + agent
 ```
 
 - **Voice pipeline** — the browser fetches a short-lived ephemeral client secret from
@@ -29,26 +30,27 @@ apps/
   fresh at the start of every call with current availability.
 - **Call lifecycle** — "New call" creates a record; turns stream to the transcript; ending
   the call locks it forever (writes 409 afterwards) and enqueues the summary job.
-- **Transfer briefs** — the instant Sarah transfers a caller (console, SIP REFER, or the
-  Twilio bridge), a BullMQ job summarizes the transcript-so-far with the Grok text model and
+- **Transfer briefs** — the instant Sarah transfers a caller (console or the Twilio
+  bridge), a BullMQ job summarizes the transcript-so-far with the Grok text model and
   emails the receiving staff member a React Email brief over SMTP, so they pick up already
   knowing the caller and the ask. Staff emails are edited at `/staff`; the sender is
   configured with `SMTP_*` + `EMAIL_FROM` (unset = feature off). Preview the template with
   `bun run email:preview` in `apps/api-gateway`.
 
-## SIP (real phone calls)
+## Phone (real phone calls via Twilio)
 
 Route a real number into Sarah from `/phone`:
 
-1. Register your number (byo_trunk) there — the app calls xAI's `POST /v2/phone-numbers`
-   with this deployment's `/api/sip/incoming` webhook and stores the signing secret it
-   returns (shown once; `XAI_SIP_WEBHOOK_SECRET` overrides it per environment).
-2. Point your carrier (Twilio / Telnyx / Plivo / PBX) at
-   `sip:{number}@sip.voice.x.ai;transport=tls`.
-3. Inbound calls hit the signed webhook; the gateway joins
-   `wss://api.x.ai/v1/realtime?call_id=…` with the API key, runs the same prompt and
-   `end_call` tool server-side, hangs up via `POST /v1/realtime/calls/{id}/hangup`, and the
-   call is logged and summarized exactly like a console call.
+1. Buy a voice number in the Twilio Console and set the account's Auth Token as
+   `TWILIO_AUTH_TOKEN` on the api-gateway.
+2. Point the number's "A call comes in" webhook (HTTP POST) at this deployment's
+   `/api/twilio/incoming`.
+3. Inbound calls hit the signed webhook; TwiML `<Connect><Stream>` pipes the caller's
+   audio to the gateway, which bridges it 1:1 into `wss://api.x.ai/v1/realtime` and runs
+   the same prompt with the `transfer_call` + `end_call` tools. A transfer stashes the
+   target, the stream closes, and Twilio's `<Redirect>` → `<Dial>` connects the caller to
+   the staff member's phone. Every call is logged and summarized exactly like a console
+   call.
 
 ## Getting started
 

@@ -34,6 +34,7 @@ export type PhoneConfig = Awaited<ReturnType<typeof client.phone.config>>;
 /** Human label for where a call came from. */
 export function callSource(call: Pick<Call, "userId">): string {
   if (call.userId.startsWith("phone:")) return call.userId.slice("phone:".length);
+  // Rows recorded before the Direct SIP path was removed.
   if (call.userId.startsWith("sip:")) return call.userId.slice("sip:".length);
   return "Console";
 }

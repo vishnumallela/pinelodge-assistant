@@ -42,11 +42,6 @@ const schema = z.object({
   FACILITY_NAME: z.string().default("Pine Lodge Assisted Living"),
   FACILITY_TIMEZONE: z.string().default("America/Chicago"),
 
-  // SIP (optional): set the webhook signing secret from the Direct SIP number
-  // registration to enable POST /api/sip/incoming. The realtime WS for SIP
-  // calls authenticates with XAI_API_KEY (ephemeral secrets are not allowed).
-  XAI_SIP_WEBHOOK_SECRET: z.string().optional(),
-
   // Twilio bridge (optional): the account's auth token enables
   // POST /api/twilio/incoming + the media-stream WebSocket, and validates
   // X-Twilio-Signature on the webhook. Works without xAI's gated agents API.
@@ -94,7 +89,6 @@ export const env = {
   XAI_SUMMARY_MODEL: raw.XAI_SUMMARY_MODEL,
   FACILITY_NAME: raw.FACILITY_NAME,
   FACILITY_TIMEZONE: raw.FACILITY_TIMEZONE,
-  XAI_SIP_WEBHOOK_SECRET: raw.XAI_SIP_WEBHOOK_SECRET,
   TWILIO_AUTH_TOKEN: raw.TWILIO_AUTH_TOKEN,
   SMTP_HOST: raw.SMTP_HOST,
   SMTP_PORT: raw.SMTP_PORT,

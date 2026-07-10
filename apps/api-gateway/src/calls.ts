@@ -4,7 +4,7 @@ import { ship } from "./observability";
 import { calls, type CallRow, type CallSummary, type TranscriptTurn } from "./schema";
 
 /**
- * Single-admin data layer: every call (console, Twilio, SIP) belongs to the
+ * Single-admin data layer: every call (console or Twilio) belongs to the
  * one dashboard, so queries are id-scoped only. The userId column records the
  * call's source ("console" or the caller's line) for display.
  */

@@ -4,7 +4,6 @@ import { createCall, endCall, getCall, listCallsPage, logCallEvent, saveTranscri
 import { env } from "./env";
 import { DEFAULT_GREETING, DEFAULT_TEMPLATE, getAgentPrompt, saveTemplate } from "./prompt";
 import { enqueueSummary, enqueueTransferEmail } from "./queue";
-import { getSipSecret, listRegisteredNumbers, registerNumber } from "./sip";
 import { createStaff, deleteStaff, findRedirectTarget, listStaff, updateStaff } from "./staff";
 import { twilioEnabled } from "./twilio";
 
@@ -163,50 +162,14 @@ export const router = {
   },
 
   phone: {
-    config: authed.handler(async ({ context }) => {
-      const secret = await getSipSecret();
-      return {
-        twilio: {
-          enabled: twilioEnabled(),
-          hasApiKey: Boolean(env.XAI_API_KEY),
-          voiceWebhookUrl: `${context.origin}/api/twilio/incoming`,
-          streamUrl: `${context.origin.replace(/^http/, "ws")}/api/twilio/stream`,
-        },
-        sip: {
-          enabled: Boolean(secret && env.XAI_API_KEY),
-          hasApiKey: Boolean(env.XAI_API_KEY),
-          hasSecret: Boolean(secret),
-          secretSource: env.XAI_SIP_WEBHOOK_SECRET
-            ? ("env" as const)
-            : secret
-              ? ("registered" as const)
-              : null,
-          webhookUrl: `${context.origin}/api/sip/incoming`,
-          sipHost: "sip.voice.x.ai",
-          numbers: (await listRegisteredNumbers()) ?? [],
-        },
-      };
-    }),
-
-    registerSip: authed
-      .input(
-        z.object({
-          phoneNumber: z.string().regex(/^\+[1-9]\d{6,14}$/, "Use E.164, e.g. +14155550100."),
-          name: z.string().trim().min(1).default("Front desk"),
-          authUsername: z.string().trim().optional(),
-          authPassword: z.string().optional(),
-          allowedAddresses: z.array(z.string().trim().min(1)).optional(),
-        }),
-      )
-      .handler(async ({ input, context }) => {
-        const result = await registerNumber(input, `${context.origin}/api/sip/incoming`);
-        if ("error" in result) {
-          throw new ORPCError(result.status === 400 ? "BAD_REQUEST" : "INTERNAL_SERVER_ERROR", {
-            message: result.error,
-          });
-        }
-        return result;
-      }),
+    config: authed.handler(({ context }) => ({
+      twilio: {
+        enabled: twilioEnabled(),
+        hasApiKey: Boolean(env.XAI_API_KEY),
+        voiceWebhookUrl: `${context.origin}/api/twilio/incoming`,
+        streamUrl: `${context.origin.replace(/^http/, "ws")}/api/twilio/stream`,
+      },
+    })),
   },
 };
 

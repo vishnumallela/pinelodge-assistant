@@ -2,7 +2,6 @@ import { RPCHandler } from "@orpc/server/fetch";
 import { ensureSchema } from "./src/db";
 import { env } from "./src/env";
 import { startSummaryWorker, startTransferEmailWorker } from "./src/queue";
-import { handleSipWebhook, sipEnabled } from "./src/sip";
 import {
   handleTwilioIncoming,
   handleTwilioResume,
@@ -133,12 +132,8 @@ const server = Bun.serve<TwilioSocketData>({
       res = json({
         ok: true,
         service: "api-gateway",
-        sip: await sipEnabled(),
         twilio: twilioEnabled(),
       });
-    } else if (path === "/api/sip/incoming" && req.method === "POST") {
-      // Authenticated by webhook signature, not by a browser session.
-      res = await handleSipWebhook(req);
     } else if (path === "/api/twilio/incoming" && req.method === "POST") {
       // Authenticated by X-Twilio-Signature, not by a browser session.
       res = await handleTwilioIncoming(req, publicUrl(req));
