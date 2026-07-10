@@ -4,49 +4,55 @@ import { auth } from "./src/lib/auth";
 
 await initDb();
 
-/* ── single-admin identity ──
- * The one account is seeded on boot and ADMIN_PASSWORD is authoritative: if
- * the account already exists its password is reset to match. Sign-up
- * endpoints are blocked below and sign-in is restricted to the admin email. */
-async function seedAdmin(): Promise<void> {
+/* ── admin identities ──
+ * Every account in env.ADMINS is seeded on boot and its configured password
+ * is authoritative: if the account already exists its password is reset to
+ * match. Sign-up endpoints are blocked below and sign-in is restricted to
+ * the admin emails. */
+async function seedAdmin(admin: { email: string; password: string }): Promise<void> {
   try {
     await auth.api.signUpEmail({
       body: {
-        email: env.ADMIN_EMAIL,
-        password: env.ADMIN_PASSWORD,
-        name: env.ADMIN_EMAIL.split("@")[0] ?? "admin",
-        username: (env.ADMIN_EMAIL.split("@")[0] ?? "admin").replace(/[^a-z0-9_]/gi, ""),
+        email: admin.email,
+        password: admin.password,
+        name: admin.email.split("@")[0] ?? "admin",
+        username: (admin.email.split("@")[0] ?? "admin").replace(/[^a-z0-9_]/gi, ""),
       },
     });
-    console.log(`[auth] seeded admin ${env.ADMIN_EMAIL}`);
+    console.log(`[auth] seeded admin ${admin.email}`);
     return;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (!/already|exist/i.test(msg)) {
-      console.error("[auth] admin seed failed:", msg);
+      console.error(`[auth] admin seed failed for ${admin.email}:`, msg);
       return;
     }
   }
   // Account exists: enforce the configured password.
   try {
     const ctx = await auth.$context;
-    const user = await ctx.internalAdapter.findUserByEmail(env.ADMIN_EMAIL);
+    const user = await ctx.internalAdapter.findUserByEmail(admin.email);
     if (!user) return;
-    const hash = await ctx.password.hash(env.ADMIN_PASSWORD);
+    const hash = await ctx.password.hash(admin.password);
     await ctx.internalAdapter.updatePassword(user.user.id, hash);
-    console.log(`[auth] admin ${env.ADMIN_EMAIL} password enforced from env`);
+    console.log(`[auth] admin ${admin.email} password enforced from env`);
   } catch (e) {
-    console.error("[auth] admin password enforce failed:", e instanceof Error ? e.message : e);
+    console.error(
+      `[auth] admin password enforce failed for ${admin.email}:`,
+      e instanceof Error ? e.message : e,
+    );
   }
 }
-await seedAdmin();
+for (const admin of env.ADMINS) await seedAdmin(admin);
 
-/** Reject sign-ups entirely, and sign-ins for anyone but the admin. */
-async function guardSingleAdmin(req: Request): Promise<Response | null> {
+const adminEmails = new Set(env.ADMINS.map((a) => a.email));
+
+/** Reject sign-ups entirely, and sign-ins for anyone but the admins. */
+async function guardAdminsOnly(req: Request): Promise<Response | null> {
   const path = new URL(req.url).pathname;
   if (path.startsWith("/api/auth/sign-up")) {
     return Response.json(
-      { error: "Sign-ups are disabled. This is a single-admin application." },
+      { error: "Sign-ups are disabled. This is an admin-only application." },
       { status: 403 },
     );
   }
@@ -56,7 +62,7 @@ async function guardSingleAdmin(req: Request): Promise<Response | null> {
       .json()
       .catch(() => null)) as { email?: unknown } | null;
     const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
-    if (email !== env.ADMIN_EMAIL) {
+    if (!adminEmails.has(email)) {
       return Response.json({ error: "Invalid email or password." }, { status: 401 });
     }
   }
@@ -83,7 +89,7 @@ async function withCors(req: Request, handler: (req: Request) => Response | Prom
   const origin = req.headers.get("origin");
   if (req.method === "OPTIONS")
     return new Response(null, { status: 204, headers: corsHeaders(origin) });
-  const res = (await guardSingleAdmin(req)) ?? (await handler(req));
+  const res = (await guardAdminsOnly(req)) ?? (await handler(req));
   const headers = new Headers(res.headers);
   for (const [k, v] of Object.entries(corsHeaders(origin))) headers.set(k, v);
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });

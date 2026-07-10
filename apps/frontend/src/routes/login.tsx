@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 
-import { PineMark } from "@/components/brand/PineMark";
 import { toast } from "sonner";
 
 import { signIn } from "@/lib/auth-client";
@@ -43,9 +42,6 @@ export function LoginPage() {
     <div className="grid min-h-dvh place-items-center bg-background px-4 py-10">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
-          <span className="grid h-12 w-12 place-items-center rounded-full bg-foreground text-background">
-            <PineMark className="h-7 w-7" />
-          </span>
           <div>
             <h1 className="font-display text-balance text-[30px] font-normal leading-tight tracking-normal">
               {PRODUCT_NAME}

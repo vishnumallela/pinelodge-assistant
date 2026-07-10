@@ -10,7 +10,6 @@ import {
   Users,
 } from "lucide-react";
 
-import { PineMark } from "@/components/brand/PineMark";
 import { PromptEditor } from "@/components/prompt/PromptEditor";
 import { VoiceSettingsPanel } from "@/components/voice/VoiceSettingsPanel";
 
@@ -61,9 +60,6 @@ function Shell() {
           onClick={closeMobile}
           className="flex items-center gap-2.5 rounded-lg px-2 py-1"
         >
-          <span className="grid h-7 w-7 place-items-center rounded-lg bg-foreground text-background">
-            <PineMark className="h-4.5 w-4.5" />
-          </span>
           <span className="font-display text-[17px] leading-none tracking-normal">
             {PRODUCT_NAME}
           </span>
@@ -133,9 +129,6 @@ function Shell() {
             <Menu className="h-4 w-4" />
           </button>
           <Link to="/" className="flex items-center gap-2.5 px-1">
-            <span className="grid h-7 w-7 place-items-center rounded-lg bg-foreground text-background">
-              <PineMark className="h-4.5 w-4.5" />
-            </span>
             <span className="font-display text-[17px] leading-none tracking-normal">
               {PRODUCT_NAME}
             </span>

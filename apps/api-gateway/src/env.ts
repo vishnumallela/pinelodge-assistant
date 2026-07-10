@@ -15,8 +15,19 @@ const schema = z.object({
   // Auth service (identity lives there; we resolve sessions against it)
   BETTER_AUTH_URL: z.string().url().default("http://localhost:3001"),
 
-  // Single-admin application: only this identity may use the dashboard.
+  // Admin allowlist: only these identities may use the dashboard.
+  // ADMIN_EMAILS adds admins beyond ADMIN_EMAIL, comma-separated.
   ADMIN_EMAIL: z.string().email().default("vishnu@stackaisolutions.com"),
+  ADMIN_EMAILS: z
+    .string()
+    .default("ravi@stackaisolutions.com")
+    .transform((s) =>
+      s
+        .split(",")
+        .map((e) => e.trim().toLowerCase())
+        .filter(Boolean),
+    )
+    .pipe(z.array(z.string().email())),
 
   // Server (PORT is injected by hosts like Railway; API_PORT is the local default)
   PORT: z.coerce.number().int().positive().optional(),
@@ -86,7 +97,7 @@ export const env = {
   DATABASE_URL: raw.DATABASE_URL_APP,
   REDIS_URL: raw.REDIS_URL,
   AUTH_URL: raw.BETTER_AUTH_URL,
-  ADMIN_EMAIL: raw.ADMIN_EMAIL.toLowerCase(),
+  ADMIN_EMAILS: [...new Set([raw.ADMIN_EMAIL.toLowerCase(), ...raw.ADMIN_EMAILS])],
   PORT: raw.PORT ?? raw.API_PORT,
   ALLOWED_ORIGINS: raw.AUTH_TRUSTED_ORIGINS,
   XAI_API_KEY: raw.XAI_API_KEY,

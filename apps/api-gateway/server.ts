@@ -43,7 +43,7 @@ function withCors(res: Response, origin: string | null): Response {
 }
 
 /** Resolve the signed-in user from the auth service (cookie/bearer forwarded).
- *  Single-admin application: any identity other than ADMIN_EMAIL is rejected. */
+ *  Admin-only application: any identity outside the admin allowlist is rejected. */
 async function sessionUser(req: Request): Promise<{ id: string } | null> {
   const cookie = req.headers.get("cookie");
   const authz = req.headers.get("authorization");
@@ -56,7 +56,7 @@ async function sessionUser(req: Request): Promise<{ id: string } | null> {
     const data = res.ok ? ((await res.json()) as { user?: Record<string, unknown> } | null) : null;
     if (!data?.user) return null;
     const email = String(data.user.email ?? "").toLowerCase();
-    if (email !== env.ADMIN_EMAIL) return null;
+    if (!env.ADMIN_EMAILS.includes(email)) return null;
     return { id: String(data.user.id) };
   } catch {
     return null;
