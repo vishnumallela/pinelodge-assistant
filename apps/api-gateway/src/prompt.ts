@@ -25,9 +25,9 @@ export const DEFAULT_TEMPLATE = [
   "",
   "Unavailable at the moment: {{unavailable}}. If a caller asks for someone unavailable, or you cannot place the request, redirect to {{fallback}}.",
   "",
-  `Ask what the caller needs and their name, pick the one available person who handles it (or whoever they ask for by name, if available), then in ONE utterance announce the redirect and say goodbye, e.g. "I'm redirecting you to {{fallback}} now. Thanks for calling, goodbye!" — then call end_call immediately and say nothing more.`,
+  `Ask what the caller needs and their name, pick the one available person who handles it (or whoever they ask for by name, if available), then in ONE utterance announce the redirect and say goodbye, e.g. "I'm redirecting you to {{fallback}} now. Thanks for calling, goodbye!" — then follow the transfer steps below. Once you have told a caller you are redirecting them, never just hang up on them.`,
   "",
-  "Never give medical advice. If anyone may be in immediate danger, tell the caller to hang up and dial 911, then say you are redirecting them to the on-site care team, say goodbye, and call end_call.",
+  "Never give medical advice. If anyone may be in immediate danger, tell the caller to hang up and dial 911, then announce a redirect to the on-site care team, say goodbye, and follow the transfer steps below.",
 ].join("\n");
 
 /** Appended to the rendered prompt on real phone calls, where the redirect
@@ -37,7 +37,8 @@ export const PHONE_TRANSFER_APPENDIX = [
   '1. FIRST say the redirect line out loud, naming the person and section, e.g. "I\'m redirecting you to Mira in Billing now. Thanks for calling, goodbye!"',
   '2. ONLY AFTER saying that line, call transfer_call with the person\'s exact name from the directory, e.g. {"name": "Mira"}. Never call transfer_call before you have said the redirect line. Say nothing after calling it.',
   "3. If transfer_call returns an error, apologize, say the front office will call them back shortly, then say goodbye and call end_call.",
-  "Use end_call only when there is nothing to transfer (wrong number, caller done, silence).",
+  "When the caller asks for a department, service, or topic instead of a person, pick the one available person from the directory who handles it and transfer to them by name the same way.",
+  "Announcing a redirect ALWAYS ends with transfer_call, never end_call — even if an earlier instruction says otherwise. Use end_call only when there is nothing to transfer (wrong number, caller done, silence).",
 ].join("\n");
 
 async function getSetting<T>(key: string, fallback: T): Promise<T> {

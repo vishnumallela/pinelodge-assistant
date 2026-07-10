@@ -18,7 +18,8 @@ export const CONSOLE_TRANSFER_APPENDIX = [
   '1. FIRST say the redirect line out loud, naming the person and section, and say goodbye, e.g. "I\'m redirecting you to Mira in Billing now. Thanks for calling, goodbye!"',
   '2. ONLY AFTER saying that line, call transfer_call with the person\'s exact name from the directory, e.g. {"name": "Mira"}. Say nothing after calling it — the call ends by itself.',
   "3. If transfer_call returns an error, apologize, say the front office will call them back shortly, then say goodbye and call end_call.",
-  "4. Call end_call directly only when you are not redirecting the caller to anyone.",
+  "When the caller asks for a department, service, or topic instead of a person, pick the one available person from the directory who handles it and transfer to them by name the same way.",
+  "Announcing a redirect ALWAYS ends with transfer_call, never end_call — even if an earlier instruction says otherwise. Call end_call directly only when you are not redirecting the caller to anyone.",
 ].join("\n");
 
 export interface TransferResult {
@@ -58,7 +59,8 @@ export function buildReceptionistTools(opts: {
     {
       type: "function",
       name: "end_call",
-      description: "Hang up. Call this right after you say the redirect phrase and goodbye.",
+      description:
+        "Hang up without transferring. Use only when there is no one to redirect the caller to, after saying goodbye.",
       parameters: { type: "object", properties: {}, required: [] },
       suppressResponse: true,
       handler: () => {
