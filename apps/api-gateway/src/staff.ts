@@ -102,6 +102,7 @@ export interface StaffInput {
   section: string;
   handles: string;
   phone: string;
+  email: string;
   days: number[];
   startTime: string;
   endTime: string;
@@ -115,6 +116,7 @@ export interface TransferTarget {
   name: string;
   section: string;
   phone: string;
+  email: string;
 }
 
 /** Resolve a spoken staff name to a transferable number. The person must be
@@ -125,11 +127,36 @@ export async function findTransferTarget(spokenName: string): Promise<TransferTa
   const wanted = spokenName.trim().toLowerCase();
   const match = rows.find((s) => s.name.toLowerCase() === wanted && s.active);
   if (match?.availableNow && match.phone) {
-    return { name: match.name, section: match.section, phone: match.phone };
+    return { name: match.name, section: match.section, phone: match.phone, email: match.email };
   }
   const fallback = rows.find((s) => s.isFallback && s.active && s.availableNow && s.phone);
   return fallback
-    ? { name: fallback.name, section: fallback.section, phone: fallback.phone }
+    ? {
+        name: fallback.name,
+        section: fallback.section,
+        phone: fallback.phone,
+        email: fallback.email,
+      }
+    : null;
+}
+
+/** Console variant of findTransferTarget: the redirect is announce-only (no
+ *  dial leg), so a phone is not required — only being active and on shift. */
+export async function findRedirectTarget(spokenName: string): Promise<TransferTarget | null> {
+  const rows = await listStaff();
+  const wanted = spokenName.trim().toLowerCase();
+  const match = rows.find((s) => s.name.toLowerCase() === wanted && s.active);
+  if (match?.availableNow) {
+    return { name: match.name, section: match.section, phone: match.phone, email: match.email };
+  }
+  const fallback = rows.find((s) => s.isFallback && s.active && s.availableNow);
+  return fallback
+    ? {
+        name: fallback.name,
+        section: fallback.section,
+        phone: fallback.phone,
+        email: fallback.email,
+      }
     : null;
 }
 

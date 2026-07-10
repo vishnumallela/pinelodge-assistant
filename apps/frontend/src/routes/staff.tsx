@@ -95,6 +95,17 @@ const columns = [
         <span className="text-[12px] text-muted-foreground/60">announce only</span>
       ),
   }),
+  helper.accessor("email", {
+    header: "Email",
+    cell: (info) =>
+      info.getValue() ? (
+        <span className="block max-w-50 truncate text-[12.5px] text-muted-foreground">
+          {info.getValue()}
+        </span>
+      ) : (
+        <span className="text-[12px] text-muted-foreground/60">no brief</span>
+      ),
+  }),
   helper.display({
     id: "schedule",
     header: "Schedule",
@@ -157,6 +168,7 @@ const EMPTY_FORM: StaffInput = {
   section: "",
   handles: "",
   phone: "",
+  email: "",
   days: [1, 2, 3, 4, 5],
   startTime: "09:00",
   endTime: "17:00",
@@ -314,6 +326,7 @@ function StaffEditor({
           section: editing.section,
           handles: editing.handles,
           phone: editing.phone,
+          email: editing.email,
           days: editing.days,
           startTime: editing.startTime,
           endTime: editing.endTime,
@@ -349,8 +362,13 @@ function StaffEditor({
   });
 
   const phoneOk = form.phone.trim() === "" || /^\+[1-9]\d{6,14}$/.test(form.phone.trim());
+  const emailOk = form.email.trim() === "" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim());
   const valid =
-    form.name.trim() !== "" && form.section.trim() !== "" && form.days.length > 0 && phoneOk;
+    form.name.trim() !== "" &&
+    form.section.trim() !== "" &&
+    form.days.length > 0 &&
+    phoneOk &&
+    emailOk;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -405,6 +423,20 @@ function StaffEditor({
             />
             <p className="text-[12px] text-muted-foreground">
               Calls transfer to this line. Leave empty to only announce the redirect.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="staff-email">Email</Label>
+            <Input
+              id="staff-email"
+              type="email"
+              value={form.email}
+              onChange={(e) => set("email", e.target.value)}
+              placeholder="mira@pinelodge.example"
+            />
+            <p className="text-[12px] text-muted-foreground">
+              Gets an emailed brief of the call the moment {AGENT_NAME} transfers a caller to them.
             </p>
           </div>
 

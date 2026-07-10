@@ -4,7 +4,7 @@ import { endCall as lockCall, logCallEvent, saveTranscript } from "./calls";
 import { db } from "./db";
 import { env } from "./env";
 import { getAgentPrompt, PHONE_TRANSFER_APPENDIX } from "./prompt";
-import { enqueueSummary } from "./queue";
+import { enqueueSummary, enqueueTransferEmail } from "./queue";
 import { calls, settings, type TranscriptTurn } from "./schema";
 import { findTransferTarget } from "./staff";
 
@@ -208,6 +208,7 @@ export async function handleSipWebhook(req: Request): Promise<Response> {
 async function handleSipTransfer(
   sipCallId: string,
   rowId: string,
+  from: string,
   toolCallId: string,
   argsRaw: string,
   transcript: TranscriptTurn[],
@@ -236,6 +237,15 @@ async function handleSipTransfer(
   transcript.push({
     role: "assistant",
     text: `(transferring the caller to ${target.name} in ${target.section})`,
+  });
+  // Brief the receiver right now, in parallel with the REFER, so the email
+  // lands while their phone is still ringing.
+  void enqueueTransferEmail({
+    callId: rowId,
+    target: { name: target.name, section: target.section, email: target.email },
+    transcript: [...transcript],
+    sourceLabel: `Phone call from ${from}`,
+    transferredAt: new Date().toISOString(),
   });
   send({
     type: "conversation.item.create",
@@ -412,6 +422,7 @@ async function runSipAgent(callId: string, from: string): Promise<void> {
             void handleSipTransfer(
               callId,
               rowId,
+              from,
               String(ev.call_id ?? ""),
               String(ev.arguments ?? ""),
               transcript,

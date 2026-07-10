@@ -29,6 +29,12 @@ apps/
   fresh at the start of every call with current availability.
 - **Call lifecycle** — "New call" creates a record; turns stream to the transcript; ending
   the call locks it forever (writes 409 afterwards) and enqueues the summary job.
+- **Transfer briefs** — the instant Sarah transfers a caller (console, SIP REFER, or the
+  Twilio bridge), a BullMQ job summarizes the transcript-so-far with the Grok text model and
+  emails the receiving staff member a React Email brief over SMTP, so they pick up already
+  knowing the caller and the ask. Staff emails are edited at `/staff`; the sender is
+  configured with `SMTP_*` + `EMAIL_FROM` (unset = feature off). Preview the template with
+  `bun run email:preview` in `apps/api-gateway`.
 
 ## SIP (real phone calls)
 

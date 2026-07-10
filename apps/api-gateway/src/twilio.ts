@@ -4,7 +4,7 @@ import { endCall as lockCall, logCallEvent, saveTranscript } from "./calls";
 import { db } from "./db";
 import { env } from "./env";
 import { getAgentPrompt, PHONE_TRANSFER_APPENDIX } from "./prompt";
-import { enqueueSummary } from "./queue";
+import { enqueueSummary, enqueueTransferEmail } from "./queue";
 import { calls, type TranscriptTurn } from "./schema";
 import { findTransferTarget, type TransferTarget } from "./staff";
 
@@ -160,6 +160,7 @@ class TwilioBridge {
   private xai: WebSocket | null = null;
   private streamSid = "";
   private rowId = "";
+  private from = "";
   private readonly transcript: TranscriptTurn[] = [];
   /** item_id -> transcript index: Grok re-sends cumulative transcripts per
    *  item, so turns are replaced in place, never appended twice. */
@@ -186,6 +187,7 @@ class TwilioBridge {
         const start = ev as TwilioStartEvent;
         this.streamSid = start.start?.streamSid ?? start.streamSid ?? "";
         this.rowId = start.start?.customParameters?.rowId ?? "";
+        this.from = start.start?.customParameters?.from ?? "";
         if (this.rowId) void logCallEvent(this.rowId, "media stream started");
         void this.openXai();
         break;
@@ -381,6 +383,15 @@ class TwilioBridge {
         text: `(transferring the caller to ${target.name} in ${target.section})`,
       });
       this.persist();
+      // Brief the receiver right now, while the goodbye still plays and
+      // Twilio has yet to dial them.
+      void enqueueTransferEmail({
+        callId: this.rowId,
+        target: { name: target.name, section: target.section, email: target.email },
+        transcript: [...this.transcript],
+        sourceLabel: this.from ? `Phone call from ${this.from}` : "Phone call",
+        transferredAt: new Date().toISOString(),
+      });
       send({
         type: "conversation.item.create",
         item: {

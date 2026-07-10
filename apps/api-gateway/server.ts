@@ -1,7 +1,7 @@
 import { RPCHandler } from "@orpc/server/fetch";
 import { ensureSchema } from "./src/db";
 import { env } from "./src/env";
-import { startSummaryWorker } from "./src/queue";
+import { startSummaryWorker, startTransferEmailWorker } from "./src/queue";
 import { handleSipWebhook, sipEnabled } from "./src/sip";
 import {
   handleTwilioIncoming,
@@ -16,6 +16,7 @@ import { router, type RpcContext } from "./src/router";
 await ensureSchema();
 await seedDefaultStaff();
 startSummaryWorker();
+startTransferEmailWorker();
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {

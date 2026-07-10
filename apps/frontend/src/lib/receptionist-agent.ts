@@ -10,10 +10,51 @@ export const CALLER_PROMPTS = [
   "My mom fell and she's not responding.",
 ];
 
+/** Appended to the rendered prompt on console calls. There is no dial leg to
+ *  move, but transfer_call briefs the named staff member by email while the
+ *  redirect is announced — so it must be called, not just spoken about. */
+export const CONSOLE_TRANSFER_APPENDIX = [
+  "Console transfer:",
+  '1. FIRST say the redirect line out loud, naming the person and section, and say goodbye, e.g. "I\'m redirecting you to Mira in Billing now. Thanks for calling, goodbye!"',
+  '2. ONLY AFTER saying that line, call transfer_call with the person\'s exact name from the directory, e.g. {"name": "Mira"}. Say nothing after calling it — the call ends by itself.',
+  "3. If transfer_call returns an error, apologize, say the front office will call them back shortly, then say goodbye and call end_call.",
+  "4. Call end_call directly only when you are not redirecting the caller to anyone.",
+].join("\n");
+
+export interface TransferResult {
+  ok: boolean;
+  connecting?: string;
+  error?: string;
+}
+
 /** The prompt itself lives server-side (see the Prompt editor); the client
- *  only contributes the end_call tool. */
-export function buildReceptionistTools(opts: { onEndCall: () => void }): VoiceFunctionTool[] {
+ *  contributes the end_call and transfer_call tools. */
+export function buildReceptionistTools(opts: {
+  onEndCall: () => void;
+  onTransfer: (name: string) => Promise<TransferResult>;
+}): VoiceFunctionTool[] {
   return [
+    {
+      type: "function",
+      name: "transfer_call",
+      description:
+        "Redirect the caller to a staff member and brief them about the call. Call this right after you announce the redirect and say goodbye.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Exact name of the staff member from the directory",
+          },
+        },
+        required: ["name"],
+      },
+      handler: async (args) => {
+        const name = typeof args.name === "string" ? args.name : "";
+        if (!name) return { error: "Provide the staff member's name." };
+        return opts.onTransfer(name);
+      },
+    },
     {
       type: "function",
       name: "end_call",

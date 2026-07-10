@@ -52,6 +52,19 @@ const schema = z.object({
   // X-Twilio-Signature on the webhook. Works without xAI's gated agents API.
   TWILIO_AUTH_TOKEN: z.string().optional(),
 
+  // Transfer briefs (optional): SMTP relay used to email a staff member the
+  // moment a call transfers to them. Setting SMTP_HOST + EMAIL_FROM enables it.
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().positive().default(587),
+  // Full-session TLS (port 465). Leave false for STARTTLS on 587.
+  SMTP_SECURE: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  EMAIL_FROM: z.string().optional(),
+
   // Observability sink (optional): OpenObserve-compatible JSON ingest. Call
   // events and errors ship here when all three are set.
   OBSERVE_URL: z.string().url().optional(),
@@ -83,6 +96,12 @@ export const env = {
   FACILITY_TIMEZONE: raw.FACILITY_TIMEZONE,
   XAI_SIP_WEBHOOK_SECRET: raw.XAI_SIP_WEBHOOK_SECRET,
   TWILIO_AUTH_TOKEN: raw.TWILIO_AUTH_TOKEN,
+  SMTP_HOST: raw.SMTP_HOST,
+  SMTP_PORT: raw.SMTP_PORT,
+  SMTP_SECURE: raw.SMTP_SECURE,
+  SMTP_USER: raw.SMTP_USER,
+  SMTP_PASS: raw.SMTP_PASS,
+  EMAIL_FROM: raw.EMAIL_FROM,
   OBSERVE_URL: raw.OBSERVE_URL?.replace(/\/$/, ""),
   OBSERVE_ORG: raw.OBSERVE_ORG,
   OBSERVE_USER: raw.OBSERVE_USER,

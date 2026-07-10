@@ -7,7 +7,14 @@ import { useSession } from "@/lib/auth-client";
 import { fetchVoiceToken } from "@/lib/voice-token";
 import { client, orpc, type TranscriptTurn } from "@/lib/orpc";
 import { useVoiceAgent, type UseVoiceAgentReturn } from "@/hooks/useVoiceAgent";
-import { AGENT_NAME, buildReceptionistTools, CALLER_PROMPTS } from "@/lib/receptionist-agent";
+import { useVoiceSettings } from "@/lib/voice-settings";
+import {
+  AGENT_NAME,
+  buildReceptionistTools,
+  CALLER_PROMPTS,
+  CONSOLE_TRANSFER_APPENDIX,
+  type TransferResult,
+} from "@/lib/receptionist-agent";
 
 /**
  * One live call at a time. Starting a call creates a server record, the
@@ -59,13 +66,39 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const finalizingRef = useRef(false);
 
   const tools = useMemo(
-    () => buildReceptionistTools({ onEndCall: () => setHangupRequested(true) }),
+    () =>
+      buildReceptionistTools({
+        onEndCall: () => setHangupRequested(true),
+        // Sarah's transfer_call: the server resolves the person and emails
+        // them a brief of the call so far; on success the call then ends
+        // exactly like end_call.
+        onTransfer: async (name): Promise<TransferResult> => {
+          const id = activeCallIdRef.current;
+          if (!id) return { ok: false, error: "No active call." };
+          try {
+            const result = await client.calls.transfer({
+              id,
+              name,
+              transcript: toTranscript(feedRef.current),
+            });
+            if (result.ok) setHangupRequested(true);
+            return result;
+          } catch (e) {
+            return {
+              ok: false,
+              error: e instanceof Error ? e.message : "The transfer could not be arranged.",
+            };
+          }
+        },
+      }),
     [],
   );
 
+  const { settings: voiceSettings } = useVoiceSettings();
   const agent = useVoiceAgent({
     getToken: fetchVoiceToken,
     tools,
+    sessionConfig: voiceSettings,
     onError: (m) => toast.error(m),
   });
 
@@ -155,7 +188,10 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       setHangupRequested(false);
       void qc.invalidateQueries({ queryKey: orpc.calls.list.key() });
       await navigate({ to: "/calls/$callId", params: { callId: call.id } });
-      await agent.connect({ instructions: agentPrompt.prompt, greeting: agentPrompt.greeting });
+      await agent.connect({
+        instructions: `${agentPrompt.prompt}\n\n${CONSOLE_TRANSFER_APPENDIX}`,
+        greeting: agentPrompt.greeting,
+      });
     } catch (e) {
       setActiveCallId(null);
       toast.error(e instanceof Error ? e.message : "Could not start the call.");

@@ -3,9 +3,9 @@ import { z } from "zod";
 import { createCall, endCall, getCall, listCallsPage, logCallEvent, saveTranscript } from "./calls";
 import { env } from "./env";
 import { DEFAULT_GREETING, DEFAULT_TEMPLATE, getAgentPrompt, saveTemplate } from "./prompt";
-import { enqueueSummary } from "./queue";
+import { enqueueSummary, enqueueTransferEmail } from "./queue";
 import { getSipSecret, listRegisteredNumbers, registerNumber } from "./sip";
-import { createStaff, deleteStaff, listStaff, updateStaff } from "./staff";
+import { createStaff, deleteStaff, findRedirectTarget, listStaff, updateStaff } from "./staff";
 import { twilioEnabled } from "./twilio";
 
 /**
@@ -40,6 +40,7 @@ const staffInputSchema = z.object({
     .regex(/^\+[1-9]\d{6,14}$/)
     .or(z.literal(""))
     .default(""),
+  email: z.string().trim().toLowerCase().email().or(z.literal("")).default(""),
   days: z.array(z.number().int().min(0).max(6)).default([1, 2, 3, 4, 5]),
   startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
   endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
@@ -88,6 +89,43 @@ export const router = {
         await logCallEvent(input.id, "call ended", `console, ${row.durationSeconds ?? 0}s`);
         await enqueueSummary({ callId: row.id });
         return row;
+      }),
+
+    /** Sarah's console transfer_call: the redirect is announce-only (no dial
+     *  leg), but the named staff member is briefed by email immediately. */
+    transfer: authed
+      .input(
+        z.object({
+          id: z.string().uuid(),
+          name: z.string().trim().min(1),
+          transcript: transcriptSchema,
+        }),
+      )
+      .handler(async ({ input }) => {
+        // Persist the turns spoken so far; a locked call can't transfer.
+        const saved = await saveTranscript(input.id, input.transcript);
+        if (!saved) throw new ORPCError("CONFLICT", { message: "Call is locked or not found." });
+        const target = await findRedirectTarget(input.name);
+        if (!target) {
+          await logCallEvent(
+            input.id,
+            "transfer failed",
+            `asked for "${input.name}", nobody available`,
+          );
+          return {
+            ok: false as const,
+            error: "Nobody is available to take this transfer right now.",
+          };
+        }
+        await logCallEvent(input.id, "transfer announced", `${target.name} (${target.section})`);
+        await enqueueTransferEmail({
+          callId: input.id,
+          target: { name: target.name, section: target.section, email: target.email },
+          transcript: input.transcript,
+          sourceLabel: "Console call",
+          transferredAt: new Date().toISOString(),
+        });
+        return { ok: true as const, connecting: `${target.name} in ${target.section}` };
       }),
   },
 
