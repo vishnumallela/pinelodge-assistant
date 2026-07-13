@@ -453,6 +453,15 @@ export const router = {
     /** Every configurable value with its effective state; secrets masked to
      *  a set/unset flag. */
     get: authed.handler(() => describeConfig()),
+
+    /** Reveal one stored secret to the signed-in admin — the eye icon in
+     *  Settings. Only the keys marked secret are revealable. */
+    reveal: authed
+      .input(z.object({ key: z.enum(["xaiApiKey", "twilioAuthToken", "smtpPass"]) }))
+      .handler(async ({ input }) => {
+        const config = await getConfig();
+        return { value: config[input.key] };
+      }),
     /** Save dashboard edits — applies to the next call, no restart. An empty
      *  string (or null) reverts the key to its env/default fallback. */
     save: authed

@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { Mail, Mic, PhoneCall, RotateCcw } from "lucide-react";
+import { Eye, EyeOff, Mail, Mic, PhoneCall, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { orpc, type SettingsField } from "@/lib/orpc";
+import { client, orpc, type SettingsField } from "@/lib/orpc";
 
 /**
  * Application settings, stored in Postgres and applied to the next call —
@@ -160,6 +160,34 @@ function FieldEditor({
   const clearing = touched && draft === null;
   const inputId = `setting-${field.key}`;
 
+  // Secrets: the saved value never rides along in settings.get — the eye
+  // fetches it on demand and shows it until toggled off or the field saves.
+  const [revealed, setRevealed] = useState(false);
+  const [revealedValue, setRevealedValue] = useState("");
+  useEffect(() => {
+    setRevealed(false);
+    setRevealedValue("");
+  }, [field]);
+
+  const toggleReveal = async () => {
+    if (revealed) {
+      setRevealed(false);
+      return;
+    }
+    if (!touched && field.set) {
+      try {
+        const r = await client.settings.reveal({
+          key: field.key as "xaiApiKey" | "twilioAuthToken" | "smtpPass",
+        });
+        setRevealedValue(r.value);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Could not reveal the value.");
+        return;
+      }
+    }
+    setRevealed(true);
+  };
+
   const controls = () => {
     if (field.kind === "boolean") {
       const checked = touched && !clearing ? Boolean(draft) : Boolean(field.value);
@@ -202,20 +230,43 @@ function FieldEditor({
         />
       );
     }
-    // Text — secrets never echo their saved value.
+    // Text — secrets stay masked until the eye reveals them.
     const value =
-      touched && !clearing ? String(draft ?? "") : field.secret ? "" : String(field.value);
-    return (
+      touched && !clearing
+        ? String(draft ?? "")
+        : field.secret
+          ? revealed
+            ? revealedValue
+            : ""
+          : String(field.value);
+    const input = (
       <Input
         id={inputId}
-        type={field.secret ? "password" : "text"}
+        type={field.secret && !revealed ? "password" : "text"}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={
-          field.secret ? (field.set ? "•••••••• (saved — type to replace)" : "Not set") : ""
+          field.secret ? (field.set ? "•••••••• (saved — click the eye to view)" : "Not set") : ""
         }
         autoComplete="off"
+        className={field.secret ? "pr-10" : undefined}
       />
+    );
+    if (!field.secret || (!field.set && !touched)) return input;
+    return (
+      <span className="relative block">
+        {input}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={revealed ? `Hide ${field.label}` : `Show ${field.label}`}
+          className="absolute right-1.5 top-1/2 size-7 -translate-y-1/2 text-muted-foreground"
+          onClick={() => void toggleReveal()}
+        >
+          {revealed ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+        </Button>
+      </span>
     );
   };
 
