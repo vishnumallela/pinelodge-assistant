@@ -4,7 +4,8 @@ export const Input = ({ className, type = "text", ...props }: React.ComponentPro
   <input
     type={type}
     className={cn(
-      "h-10 w-full rounded-md border border-input bg-background px-3 py-1 text-sm",
+      // text-base on mobile: below 16px, iOS Safari zooms the page on focus.
+      "h-10 w-full rounded-md border border-input bg-background px-3 py-1 text-base sm:text-sm",
       "placeholder:text-muted-foreground",
       "transition-shadow duration-150 [transition-timing-function:var(--ease-out)]",
       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",

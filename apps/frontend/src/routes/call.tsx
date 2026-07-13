@@ -67,7 +67,7 @@ function LockedCall({ callId }: { callId: string }) {
 
 function SummaryCard({ call }: { call: Call }) {
   return (
-    <section className="mt-6 rounded-2xl border border-border/70 bg-card p-6 shadow-[0_1px_2px_rgba(33,28,24,0.04)]">
+    <section className="mt-6 rounded-2xl border border-border/70 bg-card p-6 shadow-card">
       <div className="mb-4 flex items-center gap-2">
         <span className="h-4 w-1 rounded-full bg-brand" aria-hidden />
         <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">

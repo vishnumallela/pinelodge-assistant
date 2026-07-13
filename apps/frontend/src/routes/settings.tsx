@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { orpc, type SettingsField } from "@/lib/orpc";
 
@@ -108,7 +109,7 @@ export function SettingsPage() {
             {GROUPS.map((group) => (
               <section
                 key={group.id}
-                className="rounded-2xl border border-border/70 bg-card p-6 shadow-[0_1px_2px_rgba(33,28,24,0.04)]"
+                className="rounded-2xl border border-border/70 bg-card p-6 shadow-card"
               >
                 <div className="flex items-center gap-2">
                   <group.icon className="size-4 text-brand" />
@@ -170,11 +171,11 @@ function FieldEditor({
       const options = field.options ?? [];
       const value = touched && !clearing ? String(draft) : String(field.value);
       return (
-        <select
+        <Select
           id={inputId}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="h-10 w-full max-w-70 rounded-lg border border-border bg-card px-3 text-[13.5px] text-foreground"
+          className="max-w-70"
         >
           {/* An env-configured value outside the list stays visible (and
               selectable back) but everything typeable is a known option. */}
@@ -186,7 +187,7 @@ function FieldEditor({
               {o}
             </option>
           ))}
-        </select>
+        </Select>
       );
     }
     if (field.kind === "number") {

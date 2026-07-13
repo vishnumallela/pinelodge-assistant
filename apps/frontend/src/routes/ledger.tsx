@@ -156,10 +156,10 @@ export function LedgerPage() {
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
-          className="mt-8 rounded-2xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(33,28,24,0.04)]"
+          className="mt-8 rounded-2xl border border-border/70 bg-card shadow-card"
         >
           {isLoading || centerId === "" ? (
-            <div className="h-64 animate-pulse" />
+            <div className="m-5 h-56 animate-pulse rounded-xl bg-secondary/60" />
           ) : calls.length === 0 ? (
             <EmptyState onStart={() => void startCall()} />
           ) : (

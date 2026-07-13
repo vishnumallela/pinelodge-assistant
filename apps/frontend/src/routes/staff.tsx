@@ -16,6 +16,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Select } from "@/components/ui/select";
 import {
   Sheet,
   SheetBody,
@@ -263,10 +264,10 @@ export function StaffPage() {
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
-          className="mt-8 rounded-2xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(33,28,24,0.04)]"
+          className="mt-8 rounded-2xl border border-border/70 bg-card shadow-card"
         >
           {isLoading ? (
-            <div className="h-64 animate-pulse" />
+            <div className="m-5 h-56 animate-pulse rounded-xl bg-secondary/60" />
           ) : (
             <Table>
               <TableHeader>
@@ -417,11 +418,10 @@ function StaffEditor({
           {!editing && (people ?? []).length > 0 && (
             <div className="space-y-1.5">
               <Label htmlFor="staff-attach">Person</Label>
-              <select
+              <Select
                 id="staff-attach"
                 value={attachId}
                 onChange={(e) => pickPerson(e.target.value)}
-                className="h-10 w-full rounded-lg border border-border bg-card px-3 text-[13.5px] text-foreground"
               >
                 <option value="">New person</option>
                 {(people ?? []).map((p) => (
@@ -430,7 +430,7 @@ function StaffEditor({
                     {p.centers.length > 0 ? ` — already at ${p.centers.join(", ")}` : ""}
                   </option>
                 ))}
-              </select>
+              </Select>
               <p className="text-[12px] text-muted-foreground">
                 Pick someone from another center to add them here with their own schedule, or create
                 a new person.

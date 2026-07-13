@@ -76,7 +76,7 @@ export function PhonePage() {
 function TwilioSection({ config }: { config: PhoneConfig | undefined }) {
   const t = config?.twilio;
   return (
-    <section className="rounded-2xl border border-brand/25 bg-card p-6 shadow-[0_1px_2px_rgba(154,106,47,0.08)]">
+    <section className="rounded-2xl border border-brand/25 bg-card p-6 shadow-card">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <PhoneCall className="size-4 text-brand" />

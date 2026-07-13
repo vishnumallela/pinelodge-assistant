@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import {
   Sheet,
   SheetBody,
@@ -109,7 +110,7 @@ export function CentersPage() {
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
-          className="mt-8 rounded-2xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(33,28,24,0.04)]"
+          className="mt-8 rounded-2xl border border-border/70 bg-card shadow-card"
         >
           <Table>
             <TableHeader>
@@ -294,19 +295,14 @@ function CenterEditor({
 
           <div className="space-y-1.5">
             <Label htmlFor="center-tz">Timezone</Label>
-            <select
-              id="center-tz"
-              value={timezone}
-              onChange={(e) => setTimezone(e.target.value)}
-              className="h-10 w-full rounded-lg border border-border bg-card px-3 text-[13.5px] text-foreground"
-            >
+            <Select id="center-tz" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
               {!ALL_TIMEZONES.includes(timezone) && <option value={timezone}>{timezone}</option>}
               {ALL_TIMEZONES.map((tz) => (
                 <option key={tz} value={tz}>
                   {tz}
                 </option>
               ))}
-            </select>
+            </Select>
             <p className="text-[12px] text-muted-foreground">
               Staff schedules and availability at this center evaluate in this timezone.
             </p>

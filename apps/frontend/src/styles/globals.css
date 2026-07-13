@@ -90,6 +90,9 @@
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 2px);
   --radius-xl: calc(var(--radius) + 6px);
+
+  /* Card depth: two soft transparent layers instead of one hard line. */
+  --shadow-card: 0 1px 2px rgba(33, 28, 24, 0.05), 0 2px 8px -2px rgba(33, 28, 24, 0.06);
 }
 
 @layer base {
@@ -109,6 +112,8 @@
     font-feature-settings:
       "liga" 1,
       "calt" 1;
+    /* Missing weights/styles must fail visibly, never render as fakes. */
+    font-synthesis: none;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
@@ -119,6 +124,14 @@
   h4 {
     letter-spacing: -0.014em;
     text-wrap: balance;
+  }
+  p {
+    /* No single-word orphans on descriptions and helper copy. */
+    text-wrap: pretty;
+  }
+  table {
+    /* Digits align vertically in every column without per-cell classes. */
+    font-variant-numeric: tabular-nums;
   }
   ::selection {
     background-color: var(--selection);
