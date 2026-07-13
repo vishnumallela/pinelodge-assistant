@@ -137,13 +137,19 @@ export async function handleTwilioIncoming(req: Request, publicOrigin: string): 
     "call created",
     `twilio webhook from ${from} to ${to || "unknown"} (${center.name}${afterHours ? ", after hours" : ""})`,
   );
-  const streamUrl = `${publicOrigin.replace(/^http/, "ws")}/api/twilio/stream?token=${await signStreamToken()}`;
+  const streamUrl = `${publicOrigin.replace(/^http/, "ws")}/api/twilio/stream`;
+  // The auth token rides as a <Parameter>, not a URL query string: Twilio does
+  // not reliably forward query strings on the <Stream url>, but it always
+  // delivers Parameters in the "start" frame. The bridge verifies it there
+  // before opening any billed xAI session.
+  const token = await signStreamToken();
   // When the stream closes, TwiML continues to <Redirect>: the resume handler
   // dials the agreed transfer target, or hangs up if there is none.
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
     <Stream url="${streamUrl}">
+      <Parameter name="token" value="${token}" />
       <Parameter name="rowId" value="${row!.id}" />
       <Parameter name="centerId" value="${center.id}" />
       <Parameter name="from" value="${from.replaceAll('"', "")}" />
@@ -255,13 +261,16 @@ class TwilioBridge {
     switch (ev.event) {
       case "start": {
         const start = ev as TwilioStartEvent;
+        const params = start.start?.customParameters ?? {};
         this.streamSid = start.start?.streamSid ?? start.streamSid ?? "";
         this.callSid = start.start?.callSid ?? "";
-        this.rowId = start.start?.customParameters?.rowId ?? "";
-        this.centerId = start.start?.customParameters?.centerId ?? "";
-        this.from = start.start?.customParameters?.from ?? "";
-        if (this.rowId) void logCallEvent(this.rowId, "media stream started");
-        void this.openXai();
+        this.rowId = params.rowId ?? "";
+        this.centerId = params.centerId ?? "";
+        this.from = params.from ?? "";
+        // Gate the billed xAI session on the signed token our own webhook
+        // minted. A random WS client that skips or forges it never opens a
+        // Grok session or touches a call row.
+        void this.startAuthorized(params.token ?? "");
         break;
       }
       case "media": {
@@ -296,6 +305,19 @@ class TwilioBridge {
       default:
         break;
     }
+  }
+
+  /** Verify the start-frame token, then open the session. Rejecting here
+   *  (rather than at the WS upgrade) keeps the check off the URL query string,
+   *  which Twilio does not reliably forward. */
+  private async startAuthorized(token: string): Promise<void> {
+    if (!(await verifyStreamToken(token))) {
+      if (this.rowId) void logCallEvent(this.rowId, "stream rejected: bad token");
+      this.shutdown();
+      return;
+    }
+    if (this.rowId) void logCallEvent(this.rowId, "media stream started");
+    await this.openXai();
   }
 
   /** Redirect the live call to the target's phone through the REST API —

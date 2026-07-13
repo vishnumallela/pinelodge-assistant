@@ -10,7 +10,6 @@ import {
   handleTwilioResume,
   twilioEnabled,
   twilioWebSocketHandlers,
-  verifyStreamToken,
   type TwilioSocketData,
 } from "./src/twilio";
 import { seedDefaultStaff } from "./src/staff";
@@ -138,15 +137,13 @@ const server = Bun.serve<TwilioSocketData>({
     const path = new URL(req.url).pathname;
 
     // Twilio media stream: upgrade before any session/CORS handling. The
-    // token in the URL proves our own <Stream> TwiML opened this socket — no
-    // random client may drive the bridge and burn the xAI key.
+    // socket is authorized inside the bridge from the signed token in the
+    // "start" frame (Twilio doesn't reliably forward URL query strings, but
+    // always delivers Stream Parameters) — an unauthorized socket opens no
+    // billed xAI session and touches no call row.
     if (path === "/api/twilio/stream") {
       if (!(await twilioEnabled())) {
         return json({ error: "Twilio bridge is not configured." }, 503);
-      }
-      const token = new URL(req.url).searchParams.get("token");
-      if (!(await verifyStreamToken(token))) {
-        return json({ error: "Invalid or expired stream token." }, 401);
       }
       if (srv.upgrade(req, { data: { bridge: null } })) return undefined as unknown as Response;
       return json({ error: "Expected a WebSocket upgrade." }, 400);
