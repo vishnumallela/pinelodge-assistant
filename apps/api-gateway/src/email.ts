@@ -100,6 +100,16 @@ function cleanSummary(s: CallSummary): CallSummary {
   };
 }
 
+/** Keep the configured mailbox (deliverability lives on the address) but
+ *  let the display name carry the center, so an inbox full of briefs shows
+ *  at a glance which facility each one came from. */
+function fromForCenter(configuredFrom: string, centerName?: string): string {
+  if (!centerName) return configuredFrom;
+  const match = configuredFrom.match(/<([^>]+)>/);
+  const address = match ? match[1] : configuredFrom.trim();
+  return `"Sarah at ${centerName.replaceAll('"', "")}" <${address}>`;
+}
+
 export async function sendTransferEmail(input: TransferEmailInput): Promise<void> {
   const config = await getConfig();
   const origin = config.appUrl || env.ALLOWED_ORIGINS[0];
@@ -116,9 +126,9 @@ export async function sendTransferEmail(input: TransferEmailInput): Promise<void
     ...(origin ? { callUrl: `${origin}/calls/${input.callId}` } : {}),
   });
   await getClient(config).send({
-    from: config.emailFrom,
+    from: fromForCenter(config.emailFrom, input.center?.name),
     to: input.to,
-    subject: `Call transfer: ${summary.headline}`,
+    subject: `${input.center ? `[${input.center.name}] ` : ""}Call transfer: ${summary.headline}`,
     html,
     text,
   });
