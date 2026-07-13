@@ -1,10 +1,37 @@
-import { asc, eq, ne } from "drizzle-orm";
+import { and, asc, eq, ne, notExists, sql } from "drizzle-orm";
 import { db } from "./db";
-import { env } from "./env";
-import { staff, type StaffRow } from "./schema";
+import { staff, staffAssignments, type CenterRow } from "./schema";
 
-/** A staff row plus whether they're reachable at this moment (facility time). */
-export type StaffWithAvailability = StaffRow & { availableNow: boolean };
+/**
+ * Staff = a person (name, phone, email — shared everywhere) plus one
+ * assignment per center they work at (section, weekly window, time-off,
+ * fallback flag — evaluated in that center's timezone). The dashboard edits
+ * assignment rows; the person row follows along.
+ */
+
+/** One roster entry as the dashboard and the agent see it: the assignment
+ *  merged with the person. `id` is the assignment (what gets edited);
+ *  `staffId` is the person (shared across centers). */
+export interface StaffMemberRecord {
+  id: string;
+  staffId: string;
+  centerId: string;
+  name: string;
+  phone: string;
+  email: string;
+  section: string;
+  handles: string;
+  days: number[];
+  startTime: string;
+  endTime: string;
+  timeOff: string[];
+  isFallback: boolean;
+  active: boolean;
+  sort: number;
+  createdAt: Date;
+}
+
+export type StaffWithAvailability = StaffMemberRecord & { availableNow: boolean };
 
 const DEFAULT_STAFF = [
   {
@@ -46,16 +73,22 @@ const DEFAULT_STAFF = [
   },
 ];
 
-export async function seedDefaultStaff(): Promise<void> {
+/** Seed the demo roster into the default center — only on a fresh install. */
+export async function seedDefaultStaff(centerId: string): Promise<void> {
   const existing = await db.select({ id: staff.id }).from(staff).limit(1);
   if (existing.length > 0) return;
-  await db.insert(staff).values(DEFAULT_STAFF);
+  await Promise.all(
+    DEFAULT_STAFF.map(async ({ name, ...assignment }) => {
+      const [person] = await db.insert(staff).values({ name }).returning();
+      await db.insert(staffAssignments).values({ ...assignment, staffId: person!.id, centerId });
+    }),
+  );
 }
 
-/** Current date parts in the facility timezone. */
-function facilityNow(now: Date): { day: number; minutes: number; date: string } {
+/** Current date parts in the given IANA timezone. */
+function zonedNow(timezone: string, now: Date): { day: number; minutes: number; date: string } {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: env.FACILITY_TIMEZONE,
+    timeZone: timezone,
     weekday: "short",
     year: "numeric",
     month: "2-digit",
@@ -79,9 +112,9 @@ function toMinutes(hhmm: string): number {
   return h * 60 + m;
 }
 
-function isAvailable(row: StaffRow, now = new Date()): boolean {
+function isAvailable(row: StaffMemberRecord, timezone: string, now = new Date()): boolean {
   if (!row.active) return false;
-  const t = facilityNow(now);
+  const t = zonedNow(timezone, now);
   if (!row.days.includes(t.day)) return false;
   if (row.timeOff.includes(t.date)) return false;
   const start = toMinutes(row.startTime);
@@ -92,9 +125,78 @@ function isAvailable(row: StaffRow, now = new Date()): boolean {
   return t.minutes >= start || t.minutes < end;
 }
 
-export async function listStaff(now = new Date()): Promise<StaffWithAvailability[]> {
-  const rows = await db.select().from(staff).orderBy(asc(staff.sort), asc(staff.createdAt));
-  return rows.map((r) => ({ ...r, availableNow: isAvailable(r, now) }));
+const memberColumns = {
+  id: staffAssignments.id,
+  staffId: staff.id,
+  centerId: staffAssignments.centerId,
+  name: staff.name,
+  phone: staff.phone,
+  email: staff.email,
+  section: staffAssignments.section,
+  handles: staffAssignments.handles,
+  days: staffAssignments.days,
+  startTime: staffAssignments.startTime,
+  endTime: staffAssignments.endTime,
+  timeOff: staffAssignments.timeOff,
+  isFallback: staffAssignments.isFallback,
+  active: staffAssignments.active,
+  sort: staffAssignments.sort,
+  createdAt: staffAssignments.createdAt,
+};
+
+/** The center's roster, each entry annotated with availability right now
+ *  (evaluated in the center's timezone). */
+export async function listStaff(
+  center: CenterRow,
+  now = new Date(),
+): Promise<StaffWithAvailability[]> {
+  const rows = await db
+    .select(memberColumns)
+    .from(staffAssignments)
+    .innerJoin(staff, eq(staffAssignments.staffId, staff.id))
+    .where(eq(staffAssignments.centerId, center.id))
+    .orderBy(asc(staffAssignments.sort), asc(staffAssignments.createdAt));
+  return rows.map((r) => ({ ...r, availableNow: isAvailable(r, center.timezone, now) }));
+}
+
+/** People with no assignment at this center — the "add existing person"
+ *  picker, so one human never needs re-typing per center. */
+export async function listAttachablePeople(
+  centerId: string,
+): Promise<{ id: string; name: string; phone: string; email: string; centers: string[] }[]> {
+  const rows = await db
+    .select({
+      id: staff.id,
+      name: staff.name,
+      phone: staff.phone,
+      email: staff.email,
+      centerNames: sql<string[]>`
+        COALESCE(
+          (SELECT array_agg(c.name ORDER BY c.sort, c.created_at)
+           FROM staff_assignments a JOIN centers c ON c.id = a.center_id
+           WHERE a.staff_id = "staff"."id"),
+          '{}'
+        )`,
+    })
+    .from(staff)
+    .where(
+      notExists(
+        db
+          .select({ one: sql`1` })
+          .from(staffAssignments)
+          .where(
+            and(eq(staffAssignments.staffId, staff.id), eq(staffAssignments.centerId, centerId)),
+          ),
+      ),
+    )
+    .orderBy(asc(staff.name));
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    phone: r.phone,
+    email: r.email,
+    centers: r.centerNames,
+  }));
 }
 
 export interface StaffInput {
@@ -119,11 +221,15 @@ export interface TransferTarget {
   email: string;
 }
 
-/** Resolve a spoken staff name to a transferable number. The person must be
- *  active, on shift right now, and have a phone; otherwise fall back to the
- *  starred fallback (if reachable). Returns null when nobody can take it. */
-export async function findTransferTarget(spokenName: string): Promise<TransferTarget | null> {
-  const rows = await listStaff();
+/** Resolve a spoken staff name to a transferable number within the center.
+ *  The person must be active, on shift right now, and have a phone; otherwise
+ *  fall back to the center's starred fallback (if reachable). Returns null
+ *  when nobody can take it. */
+export async function findTransferTarget(
+  spokenName: string,
+  center: CenterRow,
+): Promise<TransferTarget | null> {
+  const rows = await listStaff(center);
   const wanted = spokenName.trim().toLowerCase();
   const match = rows.find((s) => s.name.toLowerCase() === wanted && s.active);
   if (match?.availableNow && match.phone) {
@@ -142,8 +248,11 @@ export async function findTransferTarget(spokenName: string): Promise<TransferTa
 
 /** Console variant of findTransferTarget: the redirect is announce-only (no
  *  dial leg), so a phone is not required — only being active and on shift. */
-export async function findRedirectTarget(spokenName: string): Promise<TransferTarget | null> {
-  const rows = await listStaff();
+export async function findRedirectTarget(
+  spokenName: string,
+  center: CenterRow,
+): Promise<TransferTarget | null> {
+  const rows = await listStaff(center);
   const wanted = spokenName.trim().toLowerCase();
   const match = rows.find((s) => s.name.toLowerCase() === wanted && s.active);
   if (match?.availableNow) {
@@ -160,31 +269,97 @@ export async function findRedirectTarget(spokenName: string): Promise<TransferTa
     : null;
 }
 
-/** Setting a fallback unsets every other one — exactly one at all times. */
-async function clearOtherFallbacks(exceptId?: string): Promise<void> {
-  if (exceptId) {
-    await db.update(staff).set({ isFallback: false }).where(ne(staff.id, exceptId));
-  } else {
-    await db.update(staff).set({ isFallback: false });
-  }
+/** Setting a center's fallback unsets every other one there — exactly one
+ *  per center at all times. */
+async function clearOtherFallbacks(centerId: string, exceptAssignmentId: string): Promise<void> {
+  await db
+    .update(staffAssignments)
+    .set({ isFallback: false })
+    .where(
+      and(eq(staffAssignments.centerId, centerId), ne(staffAssignments.id, exceptAssignmentId)),
+    );
 }
 
-export async function createStaff(input: StaffInput): Promise<StaffRow> {
+async function getMember(assignmentId: string): Promise<StaffMemberRecord | null> {
   const [row] = await db
-    .insert(staff)
-    .values({ ...input, sort: input.sort ?? 99 })
-    .returning();
-  if (input.isFallback) await clearOtherFallbacks(row!.id);
-  return row!;
-}
-
-export async function updateStaff(id: string, input: StaffInput): Promise<StaffRow | null> {
-  const [row] = await db.update(staff).set(input).where(eq(staff.id, id)).returning();
-  if (row && input.isFallback) await clearOtherFallbacks(row.id);
+    .select(memberColumns)
+    .from(staffAssignments)
+    .innerJoin(staff, eq(staffAssignments.staffId, staff.id))
+    .where(eq(staffAssignments.id, assignmentId))
+    .limit(1);
   return row ?? null;
 }
 
-export async function deleteStaff(id: string): Promise<boolean> {
-  const res = await db.delete(staff).where(eq(staff.id, id)).returning({ id: staff.id });
-  return res.length > 0;
+function splitInput(input: StaffInput) {
+  const { name, phone, email, ...assignment } = input;
+  return { person: { name, phone, email }, assignment };
+}
+
+/** Add someone to a center's roster. With `staffId` an existing person is
+ *  attached (their identity fields update to the submitted values); without
+ *  it a new person is created. Fails when the person is already on this
+ *  center's roster. */
+export async function createStaff(
+  centerId: string,
+  input: StaffInput,
+  staffId?: string,
+): Promise<StaffMemberRecord | null> {
+  const { person, assignment } = splitInput(input);
+  let personId = staffId;
+  if (personId) {
+    // Reject duplicates before touching the person, so a failed attach
+    // never rewrites their shared name/phone/email.
+    const [dup] = await db
+      .select({ id: staffAssignments.id })
+      .from(staffAssignments)
+      .where(and(eq(staffAssignments.staffId, personId), eq(staffAssignments.centerId, centerId)))
+      .limit(1);
+    if (dup) return null;
+    const [updated] = await db.update(staff).set(person).where(eq(staff.id, personId)).returning();
+    if (!updated) return null;
+  } else {
+    const [created] = await db.insert(staff).values(person).returning();
+    personId = created!.id;
+  }
+  const [row] = await db
+    .insert(staffAssignments)
+    .values({ ...assignment, staffId: personId, centerId, sort: assignment.sort ?? 99 })
+    .returning();
+  if (input.isFallback) await clearOtherFallbacks(centerId, row!.id);
+  return getMember(row!.id);
+}
+
+/** Update one assignment. Identity fields (name/phone/email) update the
+ *  person, so they change at every center — one human, one number. */
+export async function updateStaff(
+  assignmentId: string,
+  input: StaffInput,
+): Promise<StaffMemberRecord | null> {
+  const { person, assignment } = splitInput(input);
+  const [row] = await db
+    .update(staffAssignments)
+    .set(assignment)
+    .where(eq(staffAssignments.id, assignmentId))
+    .returning();
+  if (!row) return null;
+  await db.update(staff).set(person).where(eq(staff.id, row.staffId));
+  if (input.isFallback) await clearOtherFallbacks(row.centerId, row.id);
+  return getMember(row.id);
+}
+
+/** Remove someone from a center's roster. The person row is deleted too once
+ *  no center has them. */
+export async function deleteStaff(assignmentId: string): Promise<boolean> {
+  const [removed] = await db
+    .delete(staffAssignments)
+    .where(eq(staffAssignments.id, assignmentId))
+    .returning({ staffId: staffAssignments.staffId });
+  if (!removed) return false;
+  const [remaining] = await db
+    .select({ id: staffAssignments.id })
+    .from(staffAssignments)
+    .where(eq(staffAssignments.staffId, removed.staffId))
+    .limit(1);
+  if (!remaining) await db.delete(staff).where(eq(staff.id, removed.staffId));
+  return true;
 }

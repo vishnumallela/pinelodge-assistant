@@ -7,6 +7,7 @@ import { useSession } from "@/lib/auth-client";
 import { fetchVoiceToken } from "@/lib/voice-token";
 import { client, orpc, type TranscriptTurn } from "@/lib/orpc";
 import { useVoiceAgent, type UseVoiceAgentReturn } from "@/hooks/useVoiceAgent";
+import { useCenter } from "@/lib/center";
 import { useVoiceSettings } from "@/lib/voice-settings";
 import {
   AGENT_NAME,
@@ -58,6 +59,9 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const userName = session?.user.name ?? session?.user.email ?? "there";
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { centerId } = useCenter();
+  const centerIdRef = useRef(centerId);
+  centerIdRef.current = centerId;
 
   const [hangupRequested, setHangupRequested] = useState(false);
   const [activeCallId, setActiveCallId] = useState<string | null>(null);
@@ -180,9 +184,18 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 
   const startCall = useCallback(async () => {
     if (activeCallIdRef.current) return;
+    const selectedCenterId = centerIdRef.current;
+    if (!selectedCenterId) {
+      toast.error("Pick a center first.");
+      return;
+    }
     try {
-      // The prompt renders fresh at connect time so availability is current.
-      const [call, agentPrompt] = await Promise.all([client.calls.create(), client.prompt.get()]);
+      // The prompt renders fresh at connect time so availability is current;
+      // both the record and the prompt belong to the selected center.
+      const [call, agentPrompt] = await Promise.all([
+        client.calls.create({ centerId: selectedCenterId }),
+        client.prompt.get({ centerId: selectedCenterId }),
+      ]);
       finalizingRef.current = false;
       setActiveCallId(call.id);
       setHangupRequested(false);

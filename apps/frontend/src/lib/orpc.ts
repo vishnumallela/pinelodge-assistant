@@ -24,12 +24,16 @@ export const orpc = createTanstackQueryUtils(client);
 export type Call = Awaited<ReturnType<typeof client.calls.get>>;
 export type CallStatus = Call["status"];
 export type TranscriptTurn = Call["transcript"][number];
+export type Center = Awaited<ReturnType<typeof client.centers.list>>[number];
 export type StaffMember = Awaited<ReturnType<typeof client.staff.list>>[number];
-type StaffCreateInput = Parameters<typeof client.staff.create>[0];
+export type AttachablePerson = Awaited<ReturnType<typeof client.staff.people>>[number];
+type StaffCreateData = Parameters<typeof client.staff.create>[0]["data"];
 /** Editor form shape: the zod defaults are optional on the wire, but the
  *  form always carries concrete values. */
-export type StaffInput = Required<Omit<StaffCreateInput, "sort">> & Pick<StaffCreateInput, "sort">;
+export type StaffInput = Required<Omit<StaffCreateData, "sort">> & Pick<StaffCreateData, "sort">;
 export type PhoneConfig = Awaited<ReturnType<typeof client.phone.config>>;
+export type OwnedNumber = Awaited<ReturnType<typeof client.phone.numbers.list>>[number];
+export type AvailableNumber = Awaited<ReturnType<typeof client.phone.numbers.search>>[number];
 
 /** Human label for where a call came from. */
 export function callSource(call: Pick<Call, "userId">): string {

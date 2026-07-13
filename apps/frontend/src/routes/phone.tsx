@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { motion } from "framer-motion";
 import { Check, Copy, PhoneCall } from "lucide-react";
 
@@ -89,7 +90,12 @@ function TwilioSection({ config }: { config: PhoneConfig | undefined }) {
       </div>
       <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
         A Twilio number streams call audio into the same session the console uses, with the live
-        prompt, call log, and summaries. Transfers dial the staff member's line through Twilio.
+        prompt, call log, and summaries. Transfers dial the staff member's line through Twilio. The
+        dialed number decides which center answers — give each center its own number on the{" "}
+        <Link to="/centers" className="text-brand underline-offset-2 pf-hover:underline">
+          Centers
+        </Link>{" "}
+        page.
       </p>
 
       <div className="mt-5">
@@ -97,17 +103,24 @@ function TwilioSection({ config }: { config: PhoneConfig | undefined }) {
       </div>
 
       <ol className="mt-6 space-y-3">
-        <Step n={1}>Buy a voice number in the Twilio Console.</Step>
-        <Step n={2}>
+        <Step n={1}>
           Set your Twilio Auth Token as{" "}
           <code className="rounded bg-secondary px-1.5 py-0.5 text-[12px]">TWILIO_AUTH_TOKEN</code>{" "}
           on the api-gateway.
         </Step>
-        <Step n={3}>
-          Point the number at the voice webhook above: Voice Configuration, A call comes in,
-          Webhook, HTTP POST.
+        <Step n={2}>
+          Optionally add{" "}
+          <code className="rounded bg-secondary px-1.5 py-0.5 text-[12px]">TWILIO_ACCOUNT_SID</code>{" "}
+          too — then each center can search, buy, and wire up its number from the Centers page with
+          no Twilio console work.
+          {t?.numbersEnabled === true && " (Detected — number management is on.)"}
         </Step>
-        <Step n={4}>Call the number. The call appears live in the call log.</Step>
+        <Step n={3}>
+          Without the SID: buy a voice number in the Twilio Console, point it at the voice webhook
+          above (Voice Configuration, A call comes in, Webhook, HTTP POST), and enter the number on
+          the center so calls route to it.
+        </Step>
+        <Step n={4}>Call the number. The call appears live in that center's call log.</Step>
       </ol>
     </section>
   );

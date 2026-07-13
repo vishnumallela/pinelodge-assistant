@@ -4,7 +4,7 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { signIn } from "@/lib/auth-client";
-import { FACILITY_NAME, PRODUCT_NAME } from "@/lib/config";
+import { BRAND_NAME, PRODUCT_NAME } from "@/lib/config";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -47,7 +47,7 @@ export function LoginPage() {
               {PRODUCT_NAME}
             </h1>
             <p className="mt-1.5 text-pretty text-sm text-muted-foreground">
-              Admin console for {FACILITY_NAME}.
+              Admin console for every {BRAND_NAME} center.
             </p>
           </div>
         </div>

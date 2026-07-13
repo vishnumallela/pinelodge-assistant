@@ -52,12 +52,14 @@ export interface TransferEmailInput {
   sourceLabel: string;
   transferredAt: Date;
   callId: string;
+  /** The receiving center; the env FACILITY_* pair covers legacy jobs. */
+  center?: { name: string; timezone: string };
 }
 
-/** Format the transfer moment in facility time, e.g. "2:41 PM CDT". */
-function facilityTimeLabel(at: Date): string {
+/** Format the transfer moment in the center's time, e.g. "2:41 PM CDT". */
+function centerTimeLabel(at: Date, timezone: string): string {
   return new Intl.DateTimeFormat("en-US", {
-    timeZone: env.FACILITY_TIMEZONE,
+    timeZone: timezone,
     hour: "numeric",
     minute: "2-digit",
     timeZoneName: "short",
@@ -88,10 +90,13 @@ export async function sendTransferEmail(input: TransferEmailInput): Promise<void
   const summary = cleanSummary(input.summary);
   const { html, text } = await renderTransferEmail({
     staffName: input.staffName,
-    facilityName: env.FACILITY_NAME,
+    facilityName: input.center?.name ?? env.FACILITY_NAME,
     summary,
     sourceLabel: input.sourceLabel,
-    transferredAtLabel: facilityTimeLabel(input.transferredAt),
+    transferredAtLabel: centerTimeLabel(
+      input.transferredAt,
+      input.center?.timezone ?? env.FACILITY_TIMEZONE,
+    ),
     ...(origin ? { callUrl: `${origin}/calls/${input.callId}` } : {}),
   });
   await getClient().send({

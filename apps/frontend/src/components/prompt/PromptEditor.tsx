@@ -17,6 +17,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import { useCenter } from "@/lib/center";
 import { orpc } from "@/lib/orpc";
 import { AGENT_NAME } from "@/lib/receptionist-agent";
 
@@ -32,8 +33,13 @@ export function PromptEditor({
   onOpenChange: (v: boolean) => void;
 }) {
   const qc = useQueryClient();
+  const { center, centerId } = useCenter();
   const { data } = useQuery(
-    orpc.prompt.get.queryOptions({ enabled: open, refetchOnWindowFocus: false }),
+    orpc.prompt.get.queryOptions({
+      input: { centerId },
+      enabled: open && centerId !== "",
+      refetchOnWindowFocus: false,
+    }),
   );
 
   const [template, setTemplate] = useState("");
@@ -50,7 +56,7 @@ export function PromptEditor({
   const save = useMutation(
     orpc.prompt.save.mutationOptions({
       onSuccess: (next) => {
-        qc.setQueryData(orpc.prompt.get.key(), next);
+        qc.setQueryData(orpc.prompt.get.queryKey({ input: { centerId } }), next);
         toast.success("Prompt saved. It applies to the next call.");
       },
       onError: (e) => toast.error(e.message),
@@ -61,10 +67,10 @@ export function PromptEditor({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="max-w-2xl">
         <SheetHeader>
-          <SheetTitle>Agent prompt</SheetTitle>
+          <SheetTitle>Agent prompt{center ? ` — ${center.name}` : ""}</SheetTitle>
           <SheetDescription>
-            What {AGENT_NAME} is told on every call. Placeholders fill in live from the staff
-            directory when the call starts.
+            What {AGENT_NAME} is told on every call to this center. Placeholders fill in live from
+            the center's staff directory when the call starts.
           </SheetDescription>
         </SheetHeader>
 
@@ -124,7 +130,7 @@ export function PromptEditor({
           </Button>
           <Button
             disabled={!dirty || save.isPending || template.trim() === "" || greeting.trim() === ""}
-            onClick={() => save.mutate({ template, greeting })}
+            onClick={() => save.mutate({ centerId, template, greeting })}
             className="bg-brand text-brand-foreground pf-hover:bg-brand/90"
           >
             {save.isPending ? "Saving…" : "Save"}

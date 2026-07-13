@@ -49,7 +49,8 @@ const schema = z.object({
   // Text model that writes the post-call summary (never the realtime model).
   XAI_SUMMARY_MODEL: z.string().default("grok-4.3"),
 
-  // Facility identity: schedules and availability evaluate in this timezone.
+  // Seed identity for the default center created on first boot; after that
+  // every center carries its own name and timezone in the database.
   FACILITY_NAME: z.string().default("Pine Lodge Assisted Living"),
   FACILITY_TIMEZONE: z.string().default("America/Chicago"),
 
@@ -57,6 +58,10 @@ const schema = z.object({
   // POST /api/twilio/incoming + the media-stream WebSocket, and validates
   // X-Twilio-Signature on the webhook. Works without xAI's gated agents API.
   TWILIO_AUTH_TOKEN: z.string().optional(),
+  // Twilio number management (optional): with the Account SID set alongside
+  // the auth token, centers can search, buy, and wire up their own inbound
+  // numbers straight from the dashboard.
+  TWILIO_ACCOUNT_SID: z.string().optional(),
 
   // Transfer briefs (optional): SMTP relay used to email a staff member the
   // moment a call transfers to them. Setting SMTP_HOST + EMAIL_FROM enables it.
@@ -100,6 +105,7 @@ export const env = {
   FACILITY_NAME: raw.FACILITY_NAME,
   FACILITY_TIMEZONE: raw.FACILITY_TIMEZONE,
   TWILIO_AUTH_TOKEN: raw.TWILIO_AUTH_TOKEN,
+  TWILIO_ACCOUNT_SID: raw.TWILIO_ACCOUNT_SID,
   SMTP_HOST: raw.SMTP_HOST,
   SMTP_PORT: raw.SMTP_PORT,
   SMTP_SECURE: raw.SMTP_SECURE,

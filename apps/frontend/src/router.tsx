@@ -13,6 +13,7 @@ import { NotFound, RouteError } from "@/components/layout/RouteFallbacks";
 import { LedgerPage } from "@/routes/ledger";
 import { CallPage } from "@/routes/call";
 import { StaffPage } from "@/routes/staff";
+import { CentersPage } from "@/routes/centers";
 import { PhonePage } from "@/routes/phone";
 import { LoginPage } from "@/routes/login";
 
@@ -60,6 +61,12 @@ const staffRoute = createRoute({
   component: StaffPage,
 });
 
+const centersRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/centers",
+  component: CentersPage,
+});
+
 const phoneRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/phone",
@@ -68,7 +75,7 @@ const phoneRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
-  appRoute.addChildren([indexRoute, callRoute, staffRoute, phoneRoute]),
+  appRoute.addChildren([indexRoute, callRoute, staffRoute, centersRoute, phoneRoute]),
 ]);
 
 export const router = createRouter({

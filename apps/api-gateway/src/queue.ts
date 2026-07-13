@@ -83,6 +83,9 @@ export interface TransferEmailJob {
   /** "Console call" or the caller's number — shown in the email footer. */
   sourceLabel: string;
   transferredAt: string;
+  /** The center the call came into — names the email and sets its clock.
+   *  Optional so jobs queued before the centers migration still deliver. */
+  center?: { name: string; timezone: string };
 }
 
 /** Fire-and-forget from the live call path: never throws, only logs. */
@@ -126,7 +129,7 @@ export function startTransferEmailWorker(): Worker {
   const worker = new Worker<TransferEmailJob>(
     TRANSFER_QUEUE_NAME,
     async (job) => {
-      const { callId, target, transcript, sourceLabel, transferredAt } = job.data;
+      const { callId, target, transcript, sourceLabel, transferredAt, center } = job.data;
       let summary: CallSummary;
       try {
         summary = await summarizeForTransfer(transcript, target);
@@ -148,6 +151,7 @@ export function startTransferEmailWorker(): Worker {
         sourceLabel,
         transferredAt: new Date(transferredAt),
         callId,
+        ...(center ? { center } : {}),
       });
       await logCallEvent(callId, "transfer email sent", `${target.name} <${target.email}>`);
     },

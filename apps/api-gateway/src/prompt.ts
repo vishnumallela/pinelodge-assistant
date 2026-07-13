@@ -1,34 +1,38 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "./db";
-import { env } from "./env";
-import { settings } from "./schema";
+import { getCenter } from "./centers";
+import { centerSettings, type CenterRow } from "./schema";
 import { listStaff, type StaffWithAvailability } from "./staff";
 
 /**
- * The agent prompt is a template with placeholders, stored in settings so it
- * can be tuned live from the prompt editor. Rendering injects the current
- * staff directory (with availability computed at that moment) and the
- * fallback destination.
+ * The agent prompt is a template with placeholders, stored per center so each
+ * location can tune its receptionist live from the prompt editor. Rendering
+ * injects that center's staff directory (with availability computed at that
+ * moment in the center's timezone) and the fallback destination.
  *
  * Placeholders: {{greeting}} {{staff_directory}} {{unavailable}} {{fallback}}
  */
 
-export const DEFAULT_GREETING = `Thank you for calling ${env.FACILITY_NAME}, this is Sarah. How can I help you today?`;
+export function defaultGreeting(centerName: string): string {
+  return `Thank you for calling ${centerName}, this is Sarah. How can I help you today?`;
+}
 
-export const DEFAULT_TEMPLATE = [
-  `You are Sarah, the front desk receptionist at ${env.FACILITY_NAME}. Be warm and brief: one or two short sentences per turn, one question at a time. Never repeat yourself.`,
-  "",
-  `The call opens with you having already said: "{{greeting}}" — never greet again.`,
-  "",
-  "Staff available right now:",
-  "{{staff_directory}}",
-  "",
-  "Unavailable at the moment: {{unavailable}}. If a caller asks for someone unavailable, or you cannot place the request, redirect to {{fallback}}.",
-  "",
-  `Ask what the caller needs and their name, pick the one available person who handles it (or whoever they ask for by name, if available), then in ONE utterance announce the redirect and say goodbye, e.g. "I'm redirecting you to {{fallback}} now. Thanks for calling, goodbye!" — then follow the transfer steps below. Once you have told a caller you are redirecting them, never just hang up on them.`,
-  "",
-  "Never give medical advice. If anyone may be in immediate danger, tell the caller to hang up and dial 911, then announce a redirect to the on-site care team, say goodbye, and follow the transfer steps below.",
-].join("\n");
+export function defaultTemplate(centerName: string): string {
+  return [
+    `You are Sarah, the front desk receptionist at ${centerName}. Be warm and brief: one or two short sentences per turn, one question at a time. Never repeat yourself.`,
+    "",
+    `The call opens with you having already said: "{{greeting}}" — never greet again.`,
+    "",
+    "Staff available right now:",
+    "{{staff_directory}}",
+    "",
+    "Unavailable at the moment: {{unavailable}}. If a caller asks for someone unavailable, or you cannot place the request, redirect to {{fallback}}.",
+    "",
+    `Ask what the caller needs and their name, pick the one available person who handles it (or whoever they ask for by name, if available), then in ONE utterance announce the redirect and say goodbye, e.g. "I'm redirecting you to {{fallback}} now. Thanks for calling, goodbye!" — then follow the transfer steps below. Once you have told a caller you are redirecting them, never just hang up on them.`,
+    "",
+    "Never give medical advice. If anyone may be in immediate danger, tell the caller to hang up and dial 911, then announce a redirect to the on-site care team, say goodbye, and follow the transfer steps below.",
+  ].join("\n");
+}
 
 /** Appended to the rendered prompt on real phone calls, where the redirect
  *  is an actual transfer instead of an announcement. */
@@ -41,29 +45,37 @@ export const PHONE_TRANSFER_APPENDIX = [
   "Announcing a redirect ALWAYS ends with transfer_call, never end_call — even if an earlier instruction says otherwise. Use end_call only when there is nothing to transfer (wrong number, caller done, silence).",
 ].join("\n");
 
-async function getSetting<T>(key: string, fallback: T): Promise<T> {
-  const [row] = await db.select().from(settings).where(eq(settings.key, key)).limit(1);
+async function getSetting<T>(centerId: string, key: string, fallback: T): Promise<T> {
+  const [row] = await db
+    .select()
+    .from(centerSettings)
+    .where(and(eq(centerSettings.centerId, centerId), eq(centerSettings.key, key)))
+    .limit(1);
   return row ? (row.value as T) : fallback;
 }
 
-async function putSetting(key: string, value: unknown): Promise<void> {
+async function putSetting(centerId: string, key: string, value: unknown): Promise<void> {
   await db
-    .insert(settings)
-    .values({ key, value })
-    .onConflictDoUpdate({ target: settings.key, set: { value } });
+    .insert(centerSettings)
+    .values({ centerId, key, value })
+    .onConflictDoUpdate({ target: [centerSettings.centerId, centerSettings.key], set: { value } });
 }
 
-function getTemplate(): Promise<string> {
-  return getSetting("prompt_template", DEFAULT_TEMPLATE);
+function getTemplate(center: CenterRow): Promise<string> {
+  return getSetting(center.id, "prompt_template", defaultTemplate(center.name));
 }
 
-function getGreeting(): Promise<string> {
-  return getSetting("greeting", DEFAULT_GREETING);
+function getGreeting(center: CenterRow): Promise<string> {
+  return getSetting(center.id, "greeting", defaultGreeting(center.name));
 }
 
-export async function saveTemplate(template: string, greeting: string): Promise<void> {
-  await putSetting("prompt_template", template);
-  await putSetting("greeting", greeting);
+export async function saveTemplate(
+  centerId: string,
+  template: string,
+  greeting: string,
+): Promise<void> {
+  await putSetting(centerId, "prompt_template", template);
+  await putSetting(centerId, "greeting", greeting);
 }
 
 function renderPrompt(
@@ -97,19 +109,24 @@ export interface AgentPrompt {
   template: string;
   greeting: string;
   staff: StaffWithAvailability[];
+  center: CenterRow;
 }
 
-/** Everything the console and the prompt editor need, in one shot. */
-export async function getAgentPrompt(): Promise<AgentPrompt> {
+/** Everything the console, the phone bridge, and the prompt editor need for
+ *  one center, in one shot. Null when the center does not exist. */
+export async function getAgentPrompt(centerId: string): Promise<AgentPrompt | null> {
+  const center = await getCenter(centerId);
+  if (!center) return null;
   const [template, greeting, staffRows] = await Promise.all([
-    getTemplate(),
-    getGreeting(),
-    listStaff(),
+    getTemplate(center),
+    getGreeting(center),
+    listStaff(center),
   ]);
   return {
     prompt: renderPrompt(template, greeting, staffRows),
     template,
     greeting,
     staff: staffRows,
+    center,
   };
 }

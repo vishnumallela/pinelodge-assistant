@@ -1,4 +1,5 @@
 import { RPCHandler } from "@orpc/server/fetch";
+import { requireDefaultCenter } from "./src/centers";
 import { ensureSchema } from "./src/db";
 import { env } from "./src/env";
 import { startSummaryWorker, startTransferEmailWorker } from "./src/queue";
@@ -13,7 +14,8 @@ import { seedDefaultStaff } from "./src/staff";
 import { router, type RpcContext } from "./src/router";
 
 await ensureSchema();
-await seedDefaultStaff();
+const defaultCenter = await requireDefaultCenter();
+await seedDefaultStaff(defaultCenter.id);
 startSummaryWorker();
 startTransferEmailWorker();
 

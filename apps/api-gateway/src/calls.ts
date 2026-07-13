@@ -3,18 +3,20 @@ import { db } from "./db";
 import { calls, type CallRow, type CallSummary, type TranscriptTurn } from "./schema";
 
 /**
- * Single-admin data layer: every call (console or Twilio) belongs to the
- * one dashboard, so queries are id-scoped only. The userId column records the
- * call's source ("console" or the caller's line) for display.
+ * Admin data layer: every call belongs to a center. The userId column records
+ * the call's source ("console" or the caller's line) for display; the log is
+ * read center-scoped, matching the dashboard's center dropdown.
  */
 
-export async function createCall(source: string): Promise<CallRow> {
-  const [row] = await db.insert(calls).values({ userId: source }).returning();
+export async function createCall(source: string, centerId: string): Promise<CallRow> {
+  const [row] = await db.insert(calls).values({ userId: source, centerId }).returning();
   return row!;
 }
 
-/** Newest-first page of the log plus the total, for server-side pagination. */
+/** Newest-first page of one center's log plus the total, for server-side
+ *  pagination. */
 export async function listCallsPage(
+  centerId: string,
   page: number,
   pageSize: number,
 ): Promise<{ calls: CallRow[]; total: number }> {
@@ -22,10 +24,14 @@ export async function listCallsPage(
     db
       .select()
       .from(calls)
+      .where(eq(calls.centerId, centerId))
       .orderBy(desc(calls.createdAt))
       .limit(pageSize)
       .offset((page - 1) * pageSize),
-    db.select({ total: sql<number>`count(*)::int` }).from(calls),
+    db
+      .select({ total: sql<number>`count(*)::int` })
+      .from(calls)
+      .where(eq(calls.centerId, centerId)),
   ]);
   return { calls: rows, total: count?.total ?? 0 };
 }

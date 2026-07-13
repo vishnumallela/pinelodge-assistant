@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Outlet } from "@tanstack/react-router";
 import {
   AudioLines,
+  Building2,
+  Check,
+  ChevronsUpDown,
   LogOut,
   Menu,
   PhoneForwarded,
@@ -12,17 +15,20 @@ import {
 
 import { PromptEditor } from "@/components/prompt/PromptEditor";
 import { VoiceSettingsPanel } from "@/components/voice/VoiceSettingsPanel";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 import { signOut } from "@/lib/auth-client";
 import { clearBearer } from "@/lib/bearer";
 import { cn } from "@/lib/utils";
 import { PRODUCT_NAME } from "@/lib/config";
 import { CallSessionProvider, useCallSession } from "@/lib/call-session";
+import { CenterProvider, useCenter } from "@/lib/center";
 import { VoiceSettingsProvider } from "@/lib/voice-settings";
 
 const NAV = [
   { label: "Call log", to: "/", icon: ScrollText },
   { label: "Staff", to: "/staff", icon: Users },
+  { label: "Centers", to: "/centers", icon: Building2 },
   { label: "Phone line", to: "/phone", icon: PhoneForwarded },
 ] as const;
 
@@ -39,9 +45,11 @@ function signOutAndReturn() {
 export function AppLayout() {
   return (
     <VoiceSettingsProvider>
-      <CallSessionProvider>
-        <Shell />
-      </CallSessionProvider>
+      <CenterProvider>
+        <CallSessionProvider>
+          <Shell />
+        </CallSessionProvider>
+      </CenterProvider>
     </VoiceSettingsProvider>
   );
 }
@@ -64,6 +72,9 @@ function Shell() {
             {PRODUCT_NAME}
           </span>
         </Link>
+      </div>
+      <div className="px-3 pb-2">
+        <CenterSwitcher onPick={closeMobile} />
       </div>
       <nav className="flex flex-col gap-1 px-3 pt-1">
         {NAV.map((item) => (
@@ -140,6 +151,70 @@ function Shell() {
       <PromptEditor open={promptOpen} onOpenChange={setPromptOpen} />
       <VoiceSettingsPanel open={voiceOpen} onOpenChange={setVoiceOpen} />
     </div>
+  );
+}
+
+/** Which center everything on screen belongs to. Every center-scoped page
+ *  (call log, staff, prompt, new calls) follows this choice. */
+function CenterSwitcher({ onPick }: { onPick: () => void }) {
+  const { centers, center, setCenterId } = useCenter();
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="Switch center"
+          className="tap flex w-full items-center gap-2 rounded-xl border border-border/70 bg-card px-3 py-2 text-left transition-colors pf-hover:bg-accent/60"
+        >
+          <Building2 className="h-4 w-4 shrink-0 text-brand" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13px] font-medium leading-tight text-foreground">
+              {center?.name ?? "Loading…"}
+            </span>
+            <span className="block truncate text-[11px] leading-tight text-muted-foreground">
+              {center?.phoneNumber || "No phone line"}
+            </span>
+          </span>
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-56 p-1">
+        {centers.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            onClick={() => {
+              setCenterId(c.id);
+              setOpen(false);
+              onPick();
+            }}
+            className="tap flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors pf-hover:bg-accent"
+          >
+            <span className="min-w-0 flex-1">
+              <span className={cn("block truncate", !c.active && "text-muted-foreground")}>
+                {c.name}
+              </span>
+              <span className="block truncate text-[11px] text-muted-foreground">
+                {c.phoneNumber || "No phone line"}
+              </span>
+            </span>
+            {c.id === center?.id && <Check className="h-3.5 w-3.5 shrink-0 text-brand" />}
+          </button>
+        ))}
+        <div className="mx-1 my-1 border-t border-border/60" />
+        <Link
+          to="/centers"
+          onClick={() => {
+            setOpen(false);
+            onPick();
+          }}
+          className="tap flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] text-muted-foreground transition-colors pf-hover:bg-accent pf-hover:text-foreground"
+        >
+          Manage centers
+        </Link>
+      </PopoverContent>
+    </Popover>
   );
 }
 

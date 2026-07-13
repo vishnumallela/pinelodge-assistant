@@ -21,9 +21,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useCallSession } from "@/lib/call-session";
+import { useCenter } from "@/lib/center";
 import { callSource, orpc, type Call } from "@/lib/orpc";
 import { formatDuration, formatWhen } from "@/lib/format";
-import { FACILITY_NAME } from "@/lib/config";
 
 const PAGE_SIZE = 20;
 
@@ -101,12 +101,14 @@ const SHRINK = new Set(["startedAt", "from", "durationSeconds", "status", "open"
 
 export function LedgerPage() {
   const { startCall } = useCallSession();
+  const { center, centerId } = useCenter();
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
 
   const { data, isLoading } = useQuery(
     orpc.calls.list.queryOptions({
-      input: { page, pageSize: PAGE_SIZE },
+      input: { centerId, page, pageSize: PAGE_SIZE },
+      enabled: centerId !== "",
       placeholderData: keepPreviousData,
       refetchInterval: (q) =>
         (q.state.data?.calls ?? []).some((c) => c.status === "active" || c.status === "summarizing")
@@ -139,7 +141,7 @@ export function LedgerPage() {
               Call log
             </h1>
             <p className="text-[14px] text-muted-foreground">
-              Every call to {FACILITY_NAME}, written up when it ends.
+              Every call to {center?.name ?? "this center"}, written up when it ends.
             </p>
           </div>
           <Button
@@ -156,7 +158,7 @@ export function LedgerPage() {
           transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
           className="mt-8 rounded-2xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(33,28,24,0.04)]"
         >
-          {isLoading ? (
+          {isLoading || centerId === "" ? (
             <div className="h-64 animate-pulse" />
           ) : calls.length === 0 ? (
             <EmptyState onStart={() => void startCall()} />

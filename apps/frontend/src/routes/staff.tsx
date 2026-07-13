@@ -34,6 +34,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useCenter } from "@/lib/center";
 import { orpc, type StaffInput, type StaffMember } from "@/lib/orpc";
 import { AGENT_NAME } from "@/lib/receptionist-agent";
 import { cn } from "@/lib/utils";
@@ -179,8 +180,13 @@ const EMPTY_FORM: StaffInput = {
 
 export function StaffPage() {
   const qc = useQueryClient();
+  const { center, centerId } = useCenter();
   const { data: staff, isLoading } = useQuery(
-    orpc.staff.list.queryOptions({ refetchOnWindowFocus: true }),
+    orpc.staff.list.queryOptions({
+      input: { centerId },
+      enabled: centerId !== "",
+      refetchOnWindowFocus: true,
+    }),
   );
 
   const [editorOpen, setEditorOpen] = useState(false);
@@ -188,6 +194,7 @@ export function StaffPage() {
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: orpc.staff.list.key() });
+    void qc.invalidateQueries({ queryKey: orpc.staff.people.key() });
     void qc.invalidateQueries({ queryKey: orpc.prompt.get.key() });
   };
 
@@ -240,8 +247,8 @@ export function StaffPage() {
           <div className="space-y-1">
             <h1 className="font-display text-[34px] leading-none text-foreground">Staff</h1>
             <p className="text-[14px] text-muted-foreground">
-              Who {AGENT_NAME} can redirect callers to, and when they're reachable. The starred
-              person catches everything else.
+              Who {AGENT_NAME} can redirect {center ? `${center.name} callers` : "callers"} to, and
+              when they're reachable. The starred person catches everything else.
             </p>
           </div>
           <Button
@@ -298,10 +305,11 @@ export function StaffPage() {
       </div>
 
       <StaffEditor
-        key={editing?.id ?? "new"}
+        key={`${centerId}:${editing?.id ?? "new"}`}
         open={editorOpen}
         onOpenChange={setEditorOpen}
         editing={editing}
+        centerId={centerId}
         onSaved={invalidate}
       />
     </main>
@@ -312,11 +320,13 @@ function StaffEditor({
   open,
   onOpenChange,
   editing,
+  centerId,
   onSaved,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   editing: StaffMember | null;
+  centerId: string;
   onSaved: () => void;
 }) {
   const [form, setForm] = useState<StaffInput>(
@@ -337,8 +347,26 @@ function StaffEditor({
       : EMPTY_FORM,
   );
 
+  // Creating only: pick someone who already works at another center and
+  // attach them here — same person, their own schedule at this center.
+  const [attachId, setAttachId] = useState("");
+  const { data: people } = useQuery(
+    orpc.staff.people.queryOptions({
+      input: { centerId },
+      enabled: open && !editing && centerId !== "",
+    }),
+  );
+
   const set = <K extends keyof StaffInput>(key: K, value: StaffInput[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
+
+  const pickPerson = (id: string) => {
+    setAttachId(id);
+    const person = (people ?? []).find((p) => p.id === id);
+    if (person) {
+      setForm((f) => ({ ...f, name: person.name, phone: person.phone, email: person.email }));
+    }
+  };
 
   const toggleDay = (d: number) =>
     set(
@@ -352,7 +380,11 @@ function StaffEditor({
     mutationFn: () =>
       editing
         ? orpc.staff.update.call({ id: editing.id, data: form })
-        : orpc.staff.create.call(form),
+        : orpc.staff.create.call({
+            centerId,
+            data: form,
+            ...(attachId ? { staffId: attachId } : {}),
+          }),
     onSuccess: () => {
       onSaved();
       onOpenChange(false);
@@ -376,12 +408,36 @@ function StaffEditor({
         <SheetHeader>
           <SheetTitle>{editing ? `Edit ${editing.name}` : "Add a person"}</SheetTitle>
           <SheetDescription>
-            Availability is evaluated in facility time. Calls outside these windows go to the
-            fallback.
+            Availability is evaluated in the center's timezone. Calls outside these windows go to
+            the fallback.
           </SheetDescription>
         </SheetHeader>
 
         <SheetBody className="space-y-6">
+          {!editing && (people ?? []).length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="staff-attach">Person</Label>
+              <select
+                id="staff-attach"
+                value={attachId}
+                onChange={(e) => pickPerson(e.target.value)}
+                className="h-10 w-full rounded-lg border border-border bg-card px-3 text-[13.5px] text-foreground"
+              >
+                <option value="">New person</option>
+                {(people ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                    {p.centers.length > 0 ? ` — already at ${p.centers.join(", ")}` : ""}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[12px] text-muted-foreground">
+                Pick someone from another center to add them here with their own schedule, or create
+                a new person.
+              </p>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label htmlFor="staff-name">Name</Label>

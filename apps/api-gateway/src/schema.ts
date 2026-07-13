@@ -1,4 +1,14 @@
-import { boolean, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 
 /** One transcript turn as stored on the call row. */
 export interface TranscriptTurn {
@@ -24,10 +34,31 @@ export interface CallEvent {
   detail?: string;
 }
 
+/** A center (facility/location). Each center runs its own receptionist:
+ *  its own inbound number, staff roster, prompt template, and timezone. */
+export const centers = pgTable("centers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  /** IANA timezone the center's schedules and availability evaluate in. */
+  timezone: text("timezone").notNull().default("America/Chicago"),
+  /** E.164 of the Twilio number that rings this center; empty = no line yet. */
+  phoneNumber: text("phone_number").notNull().default(""),
+  /** Twilio IncomingPhoneNumber SID when the number is managed from the app. */
+  twilioNumberSid: text("twilio_number_sid").notNull().default(""),
+  active: boolean("active").notNull().default(true),
+  sort: integer("sort").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type CenterRow = typeof centers.$inferSelect;
+
 export const calls = pgTable("calls", {
   id: uuid("id").primaryKey().defaultRandom(),
   /** Call source: "console" or "phone:+1…" ("sip:+1…" on legacy rows). */
   userId: text("user_id").notNull(),
+  /** Which center took the call. Nullable only for pre-centers legacy rows;
+   *  boot migration backfills them to the default center. */
+  centerId: uuid("center_id"),
   status: text("status").$type<CallStatus>().notNull().default("active"),
   transcript: jsonb("transcript").$type<TranscriptTurn[]>().notNull().default([]),
   summary: jsonb("summary").$type<CallSummary | null>(),
@@ -40,34 +71,63 @@ export const calls = pgTable("calls", {
 
 export type CallRow = typeof calls.$inferSelect;
 
-/** Weekly working window + explicit time-off dates, evaluated in facility time. */
+/** A person. Identity only — name and how to reach them. The same person can
+ *  work at any number of centers; the per-center details (section, schedule,
+ *  fallback flag) live on their assignment rows. */
 export const staff = pgTable("staff", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
-  section: text("section").notNull(),
-  handles: text("handles").notNull().default(""),
   /** E.164 number calls transfer to; empty means announce-only. */
   phone: text("phone").notNull().default(""),
   /** Where the transfer brief email goes; empty means no email on transfer. */
   email: text("email").notNull().default(""),
-  /** Working days, 0 (Sun) – 6 (Sat). */
-  days: jsonb("days").$type<number[]>().notNull().default([1, 2, 3, 4, 5]),
-  /** "HH:MM" 24h, facility timezone. */
-  startTime: text("start_time").notNull().default("09:00"),
-  endTime: text("end_time").notNull().default("17:00"),
-  /** "YYYY-MM-DD" dates the person is off regardless of the weekly window. */
-  timeOff: jsonb("time_off").$type<string[]>().notNull().default([]),
-  /** Where calls land when the intended person is unavailable. Exactly one. */
-  isFallback: boolean("is_fallback").notNull().default(false),
-  active: boolean("active").notNull().default(true),
-  sort: integer("sort").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export type StaffRow = typeof staff.$inferSelect;
 
-/** Single-row key/value settings (prompt template, greeting). */
-export const settings = pgTable("settings", {
-  key: text("key").primaryKey(),
-  value: jsonb("value").$type<unknown>().notNull(),
-});
+/** One person's membership at one center: their role there plus the weekly
+ *  working window and time-off dates, evaluated in the center's timezone. */
+export const staffAssignments = pgTable(
+  "staff_assignments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    staffId: uuid("staff_id")
+      .notNull()
+      .references(() => staff.id, { onDelete: "cascade" }),
+    centerId: uuid("center_id")
+      .notNull()
+      .references(() => centers.id, { onDelete: "cascade" }),
+    section: text("section").notNull(),
+    handles: text("handles").notNull().default(""),
+    /** Working days, 0 (Sun) – 6 (Sat). */
+    days: jsonb("days").$type<number[]>().notNull().default([1, 2, 3, 4, 5]),
+    /** "HH:MM" 24h, center timezone. */
+    startTime: text("start_time").notNull().default("09:00"),
+    endTime: text("end_time").notNull().default("17:00"),
+    /** "YYYY-MM-DD" dates the person is off regardless of the weekly window. */
+    timeOff: jsonb("time_off").$type<string[]>().notNull().default([]),
+    /** Where this center's calls land when the intended person is
+     *  unavailable. Exactly one per center. */
+    isFallback: boolean("is_fallback").notNull().default(false),
+    active: boolean("active").notNull().default(true),
+    sort: integer("sort").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("staff_assignments_staff_center_unique").on(t.staffId, t.centerId)],
+);
+
+export type StaffAssignmentRow = typeof staffAssignments.$inferSelect;
+
+/** Per-center key/value settings (prompt template, greeting). */
+export const centerSettings = pgTable(
+  "center_settings",
+  {
+    centerId: uuid("center_id")
+      .notNull()
+      .references(() => centers.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    value: jsonb("value").$type<unknown>().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.centerId, t.key] })],
+);

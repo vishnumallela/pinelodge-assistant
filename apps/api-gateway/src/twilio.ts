@@ -1,11 +1,12 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { ServerWebSocket } from "bun";
 import { endCall as lockCall, logCallEvent, saveTranscript } from "./calls";
+import { findCenterByNumber, getCenter, getDefaultCenter } from "./centers";
 import { db } from "./db";
 import { env } from "./env";
 import { getAgentPrompt, PHONE_TRANSFER_APPENDIX } from "./prompt";
 import { enqueueSummary, enqueueTransferEmail } from "./queue";
-import { calls, type TranscriptTurn } from "./schema";
+import { calls, type CenterRow, type TranscriptTurn } from "./schema";
 import { findTransferTarget, type TransferTarget } from "./staff";
 
 /**
@@ -82,11 +83,23 @@ export async function handleTwilioIncoming(req: Request, publicOrigin: string): 
     return Response.json({ error: "Invalid Twilio signature." }, { status: 401 });
   }
   const from = params.get("From") ?? "unknown";
+  // The dialed number picks the center: each center's Twilio number routes to
+  // its own roster and prompt. Unmatched numbers land on the default center
+  // so a half-configured line still answers.
+  const to = params.get("To") ?? "";
+  const center = (await findCenterByNumber(to)) ?? (await getDefaultCenter());
+  if (!center) {
+    return Response.json({ error: "No center is configured." }, { status: 503 });
+  }
   const [row] = await db
     .insert(calls)
-    .values({ userId: `phone:${from}` })
+    .values({ userId: `phone:${from}`, centerId: center.id })
     .returning();
-  await logCallEvent(row!.id, "call created", `twilio webhook from ${from}`);
+  await logCallEvent(
+    row!.id,
+    "call created",
+    `twilio webhook from ${from} to ${to || "unknown"} (${center.name})`,
+  );
   const streamUrl = `${publicOrigin.replace(/^http/, "ws")}/api/twilio/stream`;
   // When the stream closes, TwiML continues to <Redirect>: the resume handler
   // dials the agreed transfer target, or hangs up if there is none.
@@ -95,6 +108,7 @@ export async function handleTwilioIncoming(req: Request, publicOrigin: string): 
   <Connect>
     <Stream url="${streamUrl}">
       <Parameter name="rowId" value="${row!.id}" />
+      <Parameter name="centerId" value="${center.id}" />
       <Parameter name="from" value="${from.replaceAll('"', "")}" />
     </Stream>
   </Connect>
@@ -160,6 +174,9 @@ class TwilioBridge {
   private xai: WebSocket | null = null;
   private streamSid = "";
   private rowId = "";
+  private centerId = "";
+  /** Resolved once the xAI session opens; transfers scope to this roster. */
+  private center: CenterRow | null = null;
   private from = "";
   private readonly transcript: TranscriptTurn[] = [];
   /** item_id -> transcript index: Grok re-sends cumulative transcripts per
@@ -187,6 +204,7 @@ class TwilioBridge {
         const start = ev as TwilioStartEvent;
         this.streamSid = start.start?.streamSid ?? start.streamSid ?? "";
         this.rowId = start.start?.customParameters?.rowId ?? "";
+        this.centerId = start.start?.customParameters?.centerId ?? "";
         this.from = start.start?.customParameters?.from ?? "";
         if (this.rowId) void logCallEvent(this.rowId, "media stream started");
         void this.openXai();
@@ -209,7 +227,22 @@ class TwilioBridge {
   }
 
   private async openXai(): Promise<void> {
-    const { prompt, greeting } = await getAgentPrompt();
+    // Stale centerId (deleted mid-call, legacy stream) falls back to the
+    // default center rather than dropping the caller.
+    const center =
+      (this.centerId ? await getCenter(this.centerId) : null) ?? (await getDefaultCenter());
+    if (!center) {
+      if (this.rowId) void logCallEvent(this.rowId, "no center found, ending call");
+      this.shutdown();
+      return;
+    }
+    this.center = center;
+    const agent = await getAgentPrompt(center.id);
+    if (!agent) {
+      this.shutdown();
+      return;
+    }
+    const { prompt, greeting } = agent;
     const params = new URLSearchParams({
       model: env.GROK_REALTIME_MODEL,
       "reasoning.effort": "none",
@@ -370,7 +403,7 @@ class TwilioBridge {
     } catch {
       /* leave empty */
     }
-    const target = name ? await findTransferTarget(name) : null;
+    const target = name && this.center ? await findTransferTarget(name, this.center) : null;
     if (target && this.rowId) {
       setPendingTransfer(this.rowId, target);
       void logCallEvent(
@@ -391,6 +424,9 @@ class TwilioBridge {
         transcript: [...this.transcript],
         sourceLabel: this.from ? `Phone call from ${this.from}` : "Phone call",
         transferredAt: new Date().toISOString(),
+        ...(this.center
+          ? { center: { name: this.center.name, timezone: this.center.timezone } }
+          : {}),
       });
       send({
         type: "conversation.item.create",
