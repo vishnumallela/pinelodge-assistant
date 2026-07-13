@@ -177,7 +177,7 @@ function FieldEditor({
     if (!touched && field.set) {
       try {
         const r = await client.settings.reveal({
-          key: field.key as "xaiApiKey" | "twilioAuthToken" | "smtpPass",
+          key: field.key as "twilioAuthToken" | "smtpPass",
         });
         setRevealedValue(r.value);
       } catch (e) {

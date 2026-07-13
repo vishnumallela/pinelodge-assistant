@@ -463,9 +463,10 @@ export const router = {
     get: authed.handler(() => describeConfig()),
 
     /** Reveal one stored secret to the signed-in admin — the eye icon in
-     *  Settings. Only the keys marked secret are revealable. */
+     *  Settings. Only editable secret keys are revealable (the xAI key is
+     *  env-only and never exposed here). */
     reveal: authed
-      .input(z.object({ key: z.enum(["xaiApiKey", "twilioAuthToken", "smtpPass"]) }))
+      .input(z.object({ key: z.enum(["twilioAuthToken", "smtpPass"]) }))
       .handler(async ({ input }) => {
         const config = await getConfig();
         return { value: config[input.key] };
@@ -475,7 +476,7 @@ export const router = {
     save: authed
       .input(
         z.object({
-          xaiApiKey: z.string().trim().nullable().optional(),
+          // The xAI key is env-only and intentionally not editable here.
           // Dropdown fields only accept their known-good options — a stray
           // string can never reach the xAI API.
           grokRealtimeModel: z.enum(GROK_REALTIME_MODELS).nullable().optional(),

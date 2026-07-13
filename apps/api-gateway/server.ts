@@ -1,5 +1,5 @@
 import { RPCHandler } from "@orpc/server/fetch";
-import { getConfig } from "./src/app-config";
+import { getConfig, pruneOrphanSettings } from "./src/app-config";
 import { findStuckSummarizing, sweepStaleActiveCalls } from "./src/calls";
 import { requireDefaultCenter } from "./src/centers";
 import { ensureSchema } from "./src/db";
@@ -16,6 +16,8 @@ import { seedDefaultStaff } from "./src/staff";
 import { router, type RpcContext } from "./src/router";
 
 await ensureSchema();
+// Env-only keys (the xAI key) must never be shadowed by a stale stored row.
+await pruneOrphanSettings();
 const defaultCenter = await requireDefaultCenter();
 await seedDefaultStaff(defaultCenter.id);
 startSummaryWorker();

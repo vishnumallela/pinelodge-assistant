@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, notInArray } from "drizzle-orm";
 import { db } from "./db";
 import { env } from "./env";
 import { appSettings } from "./schema";
@@ -52,16 +52,13 @@ export const GROK_REALTIME_MODELS = [
 export const GROK_VOICES = ["ara", "eve", "leo", "rex", "sal"] as const;
 export const XAI_SUMMARY_MODELS = ["grok-4.3"] as const;
 
-/** Drives both resolution and the generic Settings form in the dashboard. */
+/**
+ * Editable fields shown on the Settings page. Order matters — it's the render
+ * order. The xAI API key is deliberately NOT here: it's env-only
+ * (`XAI_API_KEY`), the one credential the whole app shares, so a stored
+ * override can never collide with — and silently break — the deployment key.
+ */
 export const CONFIG_FIELDS: readonly ConfigFieldDef[] = [
-  {
-    key: "xaiApiKey",
-    label: "xAI API key",
-    group: "xai",
-    kind: "text",
-    secret: true,
-    help: "Powers the realtime voice, transcripts, and summaries. Never sent to the browser.",
-  },
   {
     key: "grokRealtimeModel",
     label: "Realtime voice model",
@@ -237,8 +234,6 @@ export async function describeConfig(): Promise<ConfigFieldState[]> {
 
 function hasEnvValue(key: ConfigKey): boolean {
   switch (key) {
-    case "xaiApiKey":
-      return Boolean(env.XAI_API_KEY);
     case "twilioAccountSid":
       return Boolean(env.TWILIO_ACCOUNT_SID);
     case "twilioAuthToken":
@@ -257,6 +252,15 @@ function hasEnvValue(key: ConfigKey): boolean {
       // Models, voice, port, method always have a usable default.
       return true;
   }
+}
+
+/** Drop any app_settings row whose key is no longer an editable field —
+ *  e.g. a previously-stored xAI key now that the key is env-only. Runs once
+ *  at boot so a stale override can't shadow the env value. */
+export async function pruneOrphanSettings(): Promise<void> {
+  const known = CONFIG_FIELDS.map((f) => f.key as string);
+  await db.delete(appSettings).where(notInArray(appSettings.key, known));
+  cache = null;
 }
 
 /** Save dashboard edits. `null` (or "" on string fields) deletes the row,
