@@ -42,6 +42,17 @@ const COMMON_TIMEZONES = [
   "Europe/London",
 ];
 
+/** Every IANA zone the browser knows, common ones first — a strict dropdown,
+ *  so an unparseable zone can never be submitted. */
+const ALL_TIMEZONES: string[] = (() => {
+  try {
+    const rest = Intl.supportedValuesOf("timeZone").filter((tz) => !COMMON_TIMEZONES.includes(tz));
+    return [...COMMON_TIMEZONES, ...rest];
+  } catch {
+    return COMMON_TIMEZONES;
+  }
+})();
+
 export function CentersPage() {
   const qc = useQueryClient();
   const { centers, setCenterId } = useCenter();
@@ -282,21 +293,20 @@ function CenterEditor({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="center-tz">Timezone (IANA)</Label>
-            <Input
+            <Label htmlFor="center-tz">Timezone</Label>
+            <select
               id="center-tz"
               value={timezone}
               onChange={(e) => setTimezone(e.target.value)}
-              placeholder="America/Chicago"
-              list="center-tz-options"
-            />
-            <datalist id="center-tz-options">
-              {COMMON_TIMEZONES.map((tz) => (
+              className="h-10 w-full rounded-lg border border-border bg-card px-3 text-[13.5px] text-foreground"
+            >
+              {!ALL_TIMEZONES.includes(timezone) && <option value={timezone}>{timezone}</option>}
+              {ALL_TIMEZONES.map((tz) => (
                 <option key={tz} value={tz}>
                   {tz}
                 </option>
               ))}
-            </datalist>
+            </select>
             <p className="text-[12px] text-muted-foreground">
               Staff schedules and availability at this center evaluate in this timezone.
             </p>

@@ -1,6 +1,13 @@
 import { ORPCError, os } from "@orpc/server";
 import { z } from "zod";
-import { describeConfig, getConfig, saveConfig } from "./app-config";
+import {
+  describeConfig,
+  getConfig,
+  GROK_REALTIME_MODELS,
+  GROK_VOICES,
+  saveConfig,
+  XAI_SUMMARY_MODELS,
+} from "./app-config";
 import { createCall, endCall, getCall, listCallsPage, logCallEvent, saveTranscript } from "./calls";
 import {
   createCenter,
@@ -406,9 +413,11 @@ export const router = {
       .input(
         z.object({
           xaiApiKey: z.string().trim().nullable().optional(),
-          grokRealtimeModel: z.string().trim().nullable().optional(),
-          grokRealtimeVoice: z.string().trim().nullable().optional(),
-          xaiSummaryModel: z.string().trim().nullable().optional(),
+          // Dropdown fields only accept their known-good options — a stray
+          // string can never reach the xAI API.
+          grokRealtimeModel: z.enum(GROK_REALTIME_MODELS).nullable().optional(),
+          grokRealtimeVoice: z.enum(GROK_VOICES).nullable().optional(),
+          xaiSummaryModel: z.enum(XAI_SUMMARY_MODELS).nullable().optional(),
           twilioAccountSid: z.string().trim().nullable().optional(),
           twilioAuthToken: z.string().trim().nullable().optional(),
           smtpHost: z.string().trim().nullable().optional(),

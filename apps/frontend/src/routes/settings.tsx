@@ -167,15 +167,21 @@ function FieldEditor({
       );
     }
     if (field.kind === "select") {
+      const options = field.options ?? [];
       const value = touched && !clearing ? String(draft) : String(field.value);
       return (
         <select
           id={inputId}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="h-10 w-full max-w-60 rounded-lg border border-border bg-card px-3 text-[13.5px] text-foreground"
+          className="h-10 w-full max-w-70 rounded-lg border border-border bg-card px-3 text-[13.5px] text-foreground"
         >
-          {(field.options ?? []).map((o) => (
+          {/* An env-configured value outside the list stays visible (and
+              selectable back) but everything typeable is a known option. */}
+          {value !== "" && !options.includes(value) && (
+            <option value={value}>{value} (current)</option>
+          )}
+          {options.map((o) => (
             <option key={o} value={o}>
               {o}
             </option>

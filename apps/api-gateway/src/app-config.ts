@@ -41,6 +41,17 @@ export interface ConfigFieldDef {
   help?: string;
 }
 
+/** Known-good option lists — the Settings page renders these as dropdowns
+ *  and the save endpoint rejects anything else, so a stray string can never
+ *  reach the xAI API. Extend here when xAI ships new models/voices. */
+export const GROK_REALTIME_MODELS = [
+  "grok-voice-think-fast-1.0",
+  "grok-voice-fast-1.0",
+  "grok-voice-latest",
+] as const;
+export const GROK_VOICES = ["ara", "eve", "leo", "rex", "sal"] as const;
+export const XAI_SUMMARY_MODELS = ["grok-4.3"] as const;
+
 /** Drives both resolution and the generic Settings form in the dashboard. */
 export const CONFIG_FIELDS: readonly ConfigFieldDef[] = [
   {
@@ -55,15 +66,23 @@ export const CONFIG_FIELDS: readonly ConfigFieldDef[] = [
     key: "grokRealtimeModel",
     label: "Realtime voice model",
     group: "xai",
-    kind: "text",
-    help: "Pinned model id — avoid -latest aliases so the model never migrates silently.",
+    kind: "select",
+    options: GROK_REALTIME_MODELS,
+    help: "Prefer a pinned id over -latest so the model never migrates silently.",
   },
-  { key: "grokRealtimeVoice", label: "Default voice", group: "xai", kind: "text" },
+  {
+    key: "grokRealtimeVoice",
+    label: "Default voice",
+    group: "xai",
+    kind: "select",
+    options: GROK_VOICES,
+  },
   {
     key: "xaiSummaryModel",
     label: "Summary model",
     group: "xai",
-    kind: "text",
+    kind: "select",
+    options: XAI_SUMMARY_MODELS,
     help: "Text model that writes call summaries and transfer briefs.",
   },
   {
@@ -141,7 +160,9 @@ function envFallbacks(): AppConfig {
   };
 }
 
-/** Keep the stored value the right shape even if a row was hand-edited. */
+/** Keep the stored value the right shape even if a row was hand-edited:
+ *  numbers stay numbers, booleans stay booleans, and dropdown fields only
+ *  ever resolve to one of their known-good options. */
 function sanitize(key: ConfigKey, value: unknown, fallback: AppConfig): AppConfig[ConfigKey] {
   switch (key) {
     case "smtpPort": {
@@ -150,10 +171,12 @@ function sanitize(key: ConfigKey, value: unknown, fallback: AppConfig): AppConfi
     }
     case "smtpSecure":
       return typeof value === "boolean" ? value : fallback.smtpSecure;
-    case "smtpAuthMethod":
-      return value === "login" || value === "plain" ? value : fallback.smtpAuthMethod;
-    default:
-      return typeof value === "string" ? value : fallback[key];
+    default: {
+      if (typeof value !== "string") return fallback[key];
+      const options = CONFIG_FIELDS.find((f) => f.key === key)?.options;
+      if (options && !options.includes(value)) return fallback[key];
+      return value as AppConfig[ConfigKey];
+    }
   }
 }
 
