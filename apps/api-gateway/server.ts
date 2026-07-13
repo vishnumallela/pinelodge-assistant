@@ -1,14 +1,16 @@
 import { RPCHandler } from "@orpc/server/fetch";
 import { getConfig } from "./src/app-config";
+import { findStuckSummarizing, sweepStaleActiveCalls } from "./src/calls";
 import { requireDefaultCenter } from "./src/centers";
 import { ensureSchema } from "./src/db";
 import { env } from "./src/env";
-import { startSummaryWorker, startTransferEmailWorker } from "./src/queue";
+import { enqueueSummary, startSummaryWorker, startTransferEmailWorker } from "./src/queue";
 import {
   handleTwilioIncoming,
   handleTwilioResume,
   twilioEnabled,
   twilioWebSocketHandlers,
+  verifyStreamToken,
   type TwilioSocketData,
 } from "./src/twilio";
 import { seedDefaultStaff } from "./src/staff";
@@ -19,6 +21,18 @@ const defaultCenter = await requireDefaultCenter();
 await seedDefaultStaff(defaultCenter.id);
 startSummaryWorker();
 startTransferEmailWorker();
+
+// Repair calls a previous run left dangling: phone rows whose stream never
+// connected (stuck 'active'), and rows locked to 'summarizing' whose summary
+// job was lost (re-enqueue so they finish instead of hanging forever).
+void (async () => {
+  try {
+    await sweepStaleActiveCalls();
+    for (const call of await findStuckSummarizing()) await enqueueSummary({ callId: call.id });
+  } catch (e) {
+    console.error("[api-gateway] boot repair failed:", e instanceof Error ? e.message : e);
+  }
+})();
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -123,10 +137,16 @@ const server = Bun.serve<TwilioSocketData>({
 
     const path = new URL(req.url).pathname;
 
-    // Twilio media stream: upgrade before any session/CORS handling.
+    // Twilio media stream: upgrade before any session/CORS handling. The
+    // token in the URL proves our own <Stream> TwiML opened this socket — no
+    // random client may drive the bridge and burn the xAI key.
     if (path === "/api/twilio/stream") {
       if (!(await twilioEnabled())) {
         return json({ error: "Twilio bridge is not configured." }, 503);
+      }
+      const token = new URL(req.url).searchParams.get("token");
+      if (!(await verifyStreamToken(token))) {
+        return json({ error: "Invalid or expired stream token." }, 401);
       }
       if (srv.upgrade(req, { data: { bridge: null } })) return undefined as unknown as Response;
       return json({ error: "Expected a WebSocket upgrade." }, 400);

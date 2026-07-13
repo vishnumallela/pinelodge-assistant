@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, lt, ne, sql } from "drizzle-orm";
 import { db } from "./db";
 import {
   calls,
@@ -60,6 +60,66 @@ export async function listMessagesPage(
     total: count?.total ?? 0,
     openCount: open?.total ?? 0,
   };
+}
+
+/** Align a call's kind with the mode the agent actually ran (decided at
+ *  stream open, ~1-2s after the webhook stamped kind from the cutoff). Keeps
+ *  a straddling-the-cutoff message visible in the triage inbox — and stops a
+ *  standard call from being stuck there. Never demotes a message already
+ *  triaged done. */
+export async function reconcileCallKind(id: string, mode: "standard" | "message"): Promise<void> {
+  const kind: CallKind = mode === "message" ? "message" : "standard";
+  await db
+    .update(calls)
+    .set({ kind, triage: kind === "message" ? "open" : "none" })
+    .where(and(eq(calls.id, id), ne(calls.kind, kind), ne(calls.triage, "done")));
+}
+
+/** Boot sweep: a phone row whose media stream never delivered a start event
+ *  (dropped upgrade, caller hung up before connect) stays 'active' forever.
+ *  Fail anything active well past the bridge's own 10-minute cap so the log
+ *  never shows a phantom in-progress call. */
+export async function sweepStaleActiveCalls(): Promise<void> {
+  await db
+    .update(calls)
+    .set({ status: "failed" })
+    .where(
+      and(eq(calls.status, "active"), lt(calls.createdAt, new Date(Date.now() - 15 * 60_000))),
+    );
+}
+
+/** Re-drivable summary state: a row stuck in 'summarizing' (enqueue lost, or
+ *  a crash between lock and enqueue) is returned so the worker can be
+ *  re-primed on boot instead of the call hanging without a summary forever. */
+export async function findStuckSummarizing(): Promise<CallRow[]> {
+  return db
+    .select()
+    .from(calls)
+    .where(
+      and(eq(calls.status, "summarizing"), lt(calls.createdAt, new Date(Date.now() - 5 * 60_000))),
+    );
+}
+
+/** Stash the agreed transfer target on the row so the resume webhook can
+ *  dial it even after a redeploy or on another replica (the in-memory map
+ *  doesn't survive either). */
+export async function savePendingTransfer(
+  id: string,
+  target: { name: string; phone: string },
+): Promise<void> {
+  await db.update(calls).set({ pendingTransfer: target }).where(eq(calls.id, id));
+}
+
+/** Read and clear the persisted transfer target for the resume webhook. */
+export async function takePendingTransferRow(
+  id: string,
+): Promise<{ name: string; phone: string } | null> {
+  const [row] = await db
+    .update(calls)
+    .set({ pendingTransfer: null })
+    .where(eq(calls.id, id))
+    .returning({ pending: calls.pendingTransfer });
+  return row?.pending ?? null;
 }
 
 /** Dessa's triage flip: open ↔ done. Only message calls carry a state. */

@@ -99,11 +99,13 @@ export async function enqueueTransferEmail(job: TransferEmailJob): Promise<void>
       await logCallEvent(job.callId, "transfer email skipped", `${job.target.name} has no email`);
       return;
     }
-    // One brief per call: a model retrying transfer_call (or a second
-    // transfer on the same call) must not double-email the receiver. The
-    // jobId makes BullMQ drop duplicates; the lookup is for the log.
+    // One brief per (call, recipient): a model retrying transfer_call to the
+    // SAME person must not double-email them, but a genuine second transfer
+    // to a DIFFERENT person must still reach that person. Keying on the
+    // recipient makes BullMQ drop only true duplicates.
     // (No ":" allowed — BullMQ reserves it as its Redis key separator.)
-    const jobId = `transfer-${job.callId}`;
+    const recipient = job.target.email.toLowerCase().replace(/[^a-z0-9]/g, "-");
+    const jobId = `transfer-${job.callId}-${recipient}`;
     if (await transferQueue.getJob(jobId)) {
       await logCallEvent(job.callId, "transfer email skipped", "already queued for this call");
       return;

@@ -332,6 +332,14 @@ export const router = {
       .handler(async ({ input }) => {
         const call = await getCall(input.id);
         if (!call) throw new ORPCError("NOT_FOUND", { message: "Call not found." });
+        // A message-mode (after-hours) call has nobody to reach — never place
+        // a transfer, matching the phone bridge's message-mode contract.
+        if (call.kind === "message") {
+          return {
+            ok: false as const,
+            error: "After hours — take a message; there is nobody to transfer to.",
+          };
+        }
         // Persist the turns spoken so far; a locked call can't transfer.
         const saved = await saveTranscript(input.id, input.transcript);
         if (!saved) throw new ORPCError("CONFLICT", { message: "Call is locked or not found." });

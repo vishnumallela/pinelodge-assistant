@@ -1,7 +1,15 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { ServerWebSocket } from "bun";
 import twilioSdk from "twilio";
 import { getConfig } from "./app-config";
-import { endCall as lockCall, logCallEvent, saveTranscript } from "./calls";
+import {
+  endCall as lockCall,
+  logCallEvent,
+  reconcileCallKind,
+  savePendingTransfer,
+  saveTranscript,
+  takePendingTransferRow,
+} from "./calls";
 import { findCenterByNumber, getCenter, getDefaultCenter, isAfterHours } from "./centers";
 import { db } from "./db";
 import { getAgentPrompt, PHONE_TRANSFER_APPENDIX } from "./prompt";
@@ -44,6 +52,37 @@ function takePendingTransfer(rowId: string): TransferTarget | null {
   if (!t) return null;
   pendingTransfers.delete(rowId);
   return Date.now() - t.at < 5 * 60 * 1000 ? t : null;
+}
+
+/** The media-stream WebSocket can't carry an X-Twilio-Signature, so the
+ *  webhook mints a short-lived HMAC token into the stream URL and the upgrade
+ *  verifies it — proving the socket was opened by our own <Stream> TwiML, not
+ *  a random internet client burning the xAI key. */
+async function signStreamToken(): Promise<string> {
+  const { twilioAuthToken } = await getConfig();
+  const exp = Math.floor(Date.now() / 1000) + 300; // 5-minute validity
+  const mac = createHmac("sha256", twilioAuthToken || "unset")
+    .update(String(exp))
+    .digest("base64url");
+  return `${exp}.${mac}`;
+}
+
+export async function verifyStreamToken(token: string | null): Promise<boolean> {
+  if (!token) return false;
+  const [expStr, mac] = token.split(".");
+  const exp = Number(expStr);
+  if (!exp || !mac || exp < Math.floor(Date.now() / 1000)) return false;
+  const { twilioAuthToken } = await getConfig();
+  const expected = createHmac("sha256", twilioAuthToken || "unset")
+    .update(expStr!)
+    .digest("base64url");
+  try {
+    const a = Buffer.from(mac);
+    const b = Buffer.from(expected);
+    return a.length === b.length && timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
 }
 
 /** Twilio request validation, via the SDK's X-Twilio-Signature check. */
@@ -98,7 +137,7 @@ export async function handleTwilioIncoming(req: Request, publicOrigin: string): 
     "call created",
     `twilio webhook from ${from} to ${to || "unknown"} (${center.name}${afterHours ? ", after hours" : ""})`,
   );
-  const streamUrl = `${publicOrigin.replace(/^http/, "ws")}/api/twilio/stream`;
+  const streamUrl = `${publicOrigin.replace(/^http/, "ws")}/api/twilio/stream?token=${await signStreamToken()}`;
   // When the stream closes, TwiML continues to <Redirect>: the resume handler
   // dials the agreed transfer target, or hangs up if there is none.
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -129,7 +168,11 @@ export async function handleTwilioResume(req: Request, publicOrigin: string): Pr
     return Response.json({ error: "Invalid Twilio signature." }, { status: 401 });
   }
   const rowId = reqUrl.searchParams.get("rowId") ?? "";
-  const target = rowId ? takePendingTransfer(rowId) : null;
+  // In-process map first (fast path); fall back to the persisted row so a
+  // redeploy or a second replica still dials instead of hanging up.
+  const target = rowId
+    ? (takePendingTransfer(rowId) ?? (await takePendingTransferRow(rowId)))
+    : null;
   if (rowId) {
     await logCallEvent(
       rowId,
@@ -175,7 +218,12 @@ class TwilioBridge {
   private centerId = "";
   /** Resolved once the xAI session opens; transfers scope to this roster. */
   private center: CenterRow | null = null;
+  /** "message" after the center's cutoff — no transfers, take a message. */
+  private mode: "standard" | "message" = "standard";
   private from = "";
+  /** Caller audio that arrives before the xAI socket is OPEN, replayed once
+   *  it connects so the opening words of an eager caller aren't lost. */
+  private readonly pendingAudio: string[] = [];
   private readonly transcript: TranscriptTurn[] = [];
   /** item_id -> transcript index: Grok re-sends cumulative transcripts per
    *  item, so turns are replaced in place, never appended twice. */
@@ -219,16 +267,29 @@ class TwilioBridge {
       case "media": {
         const media = ev as TwilioMediaEvent;
         const payload = media.media?.payload;
-        if (payload && this.xai?.readyState === WebSocket.OPEN) {
+        if (!payload) break;
+        if (this.xai?.readyState === WebSocket.OPEN) {
           this.xai.send(JSON.stringify({ type: "input_audio_buffer.append", audio: payload }));
+        } else if (!this.finalized) {
+          // xAI is still connecting (~1-2s of DB + handshake). Buffer a couple
+          // seconds of caller audio so an eager "Hello, I need…" isn't lost;
+          // cap it so a silent-then-abandoned call can't grow unbounded.
+          if (this.pendingAudio.length < 200) this.pendingAudio.push(payload);
         }
         break;
       }
-      case "mark":
-        // Twilio echoes the mark once every queued audio before it has
-        // played to the caller — the goodbye is done, transfer now.
-        if (this.transferTarget) void this.executeTransfer();
+      case "mark": {
+        // Twilio echoes a mark once all audio queued before it has played to
+        // the caller. "transfer-goodbye" → the goodbye is done, redirect the
+        // live call now; "goodbye" → a plain end_call, hang up now.
+        const markName = (ev as { mark?: { name?: string } }).mark?.name;
+        if (markName === "transfer-goodbye" && this.transferTarget) {
+          void this.executeTransfer();
+        } else if (markName === "goodbye") {
+          this.shutdown();
+        }
         break;
+      }
       case "stop":
         this.shutdown();
         break;
@@ -291,7 +352,16 @@ class TwilioBridge {
       return;
     }
     const { prompt, greeting, mode } = agent;
+    this.mode = mode;
     const config = await getConfig();
+    // The caller may have hung up while these awaits ran; opening a billed
+    // Grok socket now would leak it, since shutdown already passed its close.
+    if (this.finalized) return;
+    // The webhook stamped kind from the cutoff ~1-2s ago; the agent's actual
+    // mode is the source of truth, so reconcile the row to it. Otherwise a
+    // call straddling the cutoff records a message the triage inbox never
+    // shows (or a standard call stuck open as a message).
+    if (this.rowId) void reconcileCallKind(this.rowId, mode);
     const params = new URLSearchParams({
       model: config.grokRealtimeModel,
       "reasoning.effort": "none",
@@ -300,6 +370,16 @@ class TwilioBridge {
       headers: { authorization: `Bearer ${config.xaiApiKey}` },
     } as unknown as string[]);
     this.xai = xai;
+    // shutdown() ran during the awaits and already skipped closing (this.xai
+    // was null then) — close the socket we just made and stop.
+    if (this.finalized) {
+      try {
+        xai.close();
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
 
     const send = (e: Record<string, unknown>) => {
       if (xai.readyState === WebSocket.OPEN) xai.send(JSON.stringify(e));
@@ -368,6 +448,12 @@ class TwilioBridge {
           content: [{ type: "output_text", text: greeting }],
         },
       });
+      // Replay any caller audio captured while the socket was connecting, so
+      // words spoken in the first second or two still reach the model.
+      for (const audio of this.pendingAudio) {
+        send({ type: "input_audio_buffer.append", audio });
+      }
+      this.pendingAudio.length = 0;
       // force_message injects a full response lifecycle, so its transcript
       // arrives through the normal event below - no manual push, no double.
       if (this.rowId) void logCallEvent(this.rowId, "xai session opened, greeting sent");
@@ -428,27 +514,41 @@ class TwilioBridge {
             this.hangupRequested = true;
             if (this.rowId) void logCallEvent(this.rowId, "agent requested hangup (end_call)");
           } else if (ev.name === "transfer_call") {
-            void this.handleTransfer(String(ev.call_id ?? ""), String(ev.arguments ?? ""), send);
+            // Message mode has nobody to dial; even if the model invents the
+            // tool call, never place a real after-hours transfer. End instead.
+            if (this.mode === "message") {
+              send({
+                type: "conversation.item.create",
+                item: {
+                  type: "function_call_output",
+                  call_id: ev.call_id,
+                  output: JSON.stringify({ error: "After hours — take a message instead." }),
+                },
+              });
+              this.hangupRequested = true;
+              if (this.rowId) void logCallEvent(this.rowId, "transfer suppressed (message mode)");
+            } else {
+              void this.handleTransfer(String(ev.call_id ?? ""), String(ev.arguments ?? ""), send);
+            }
           }
           break;
         case "response.done":
-          // Give the goodbye audio a moment to reach the caller, then end.
-          // Transfers don't ride on this — their mark echo/timer redirects
-          // the live call and shutting down here would preempt it. The mark
-          // is sent now, behind ALL queued goodbye audio; Twilio echoes it
-          // when that audio has played to the caller.
-          if (this.transferTarget) {
+          // A transfer arranges its own hand-off (mark echo + timer in
+          // handleTransfer), so this only handles plain end_call. The mark
+          // rides behind the goodbye audio and Twilio echoes it when the
+          // audio has actually played, rather than a fixed guess.
+          if (!this.transferTarget && this.hangupRequested) {
             if (this.twilio.readyState === 1) {
               this.twilio.send(
                 JSON.stringify({
                   event: "mark",
                   streamSid: this.streamSid,
-                  mark: { name: "transfer-goodbye" },
+                  mark: { name: "goodbye" },
                 }),
               );
             }
-          } else if (this.hangupRequested) {
-            setTimeout(() => this.shutdown(), 3000);
+            // Backstop if the echo is lost (no queued audio to mark behind).
+            setTimeout(() => this.shutdown(), 6000);
           }
           break;
         default:
@@ -478,6 +578,9 @@ class TwilioBridge {
     const target = name && this.center ? await findTransferTarget(name, this.center) : null;
     if (target && this.rowId) {
       setPendingTransfer(this.rowId, target);
+      // Also persist, so the resume-webhook dial survives a redeploy / other
+      // replica when the REST live-redirect isn't available.
+      void savePendingTransfer(this.rowId, { name: target.name, phone: target.phone });
       void logCallEvent(
         this.rowId,
         "transfer arranged",
@@ -508,14 +611,28 @@ class TwilioBridge {
           output: JSON.stringify({ ok: true, connecting: `${target.name} in ${target.section}` }),
         },
       });
-      // Immediate hand-off: a mark rides behind the queued goodbye audio;
-      // Twilio echoes it the moment that audio has played, and the echo
-      // triggers the live REST redirect. The timer covers a lost echo, and
-      // never racing on response.done fixes transfers that used to hang
-      // until the idle timeout.
+      // Immediate hand-off. The model says the goodbye line, THEN calls
+      // transfer_call, so by the time this runs every goodbye audio delta is
+      // already queued to Twilio. Drop a mark right behind that audio: Twilio
+      // echoes it the instant playback reaches it, and the echo fires the
+      // live REST redirect. Sending the mark here (not on response.done)
+      // removes the race where response.done arrived before this awaited DB
+      // lookup resolved and the mark was never sent — the bug that left
+      // transfers hanging until the fallback timer.
       this.hangupRequested = true;
       this.transferTarget = target;
-      this.transferTimer = setTimeout(() => void this.executeTransfer(), 4000);
+      if (this.twilio.readyState === 1) {
+        this.twilio.send(
+          JSON.stringify({
+            event: "mark",
+            streamSid: this.streamSid,
+            mark: { name: "transfer-goodbye" },
+          }),
+        );
+      }
+      // Fallback if the mark echo never comes back (no queued audio, socket
+      // hiccup): redirect anyway after the goodbye would have played.
+      this.transferTimer = setTimeout(() => void this.executeTransfer(), 6000);
     } else {
       if (this.rowId) {
         void logCallEvent(this.rowId, "transfer failed", `asked for "${name}", nobody reachable`);

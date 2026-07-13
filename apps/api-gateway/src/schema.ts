@@ -78,6 +78,9 @@ export const calls = pgTable("calls", {
   transcript: jsonb("transcript").$type<TranscriptTurn[]>().notNull().default([]),
   summary: jsonb("summary").$type<CallSummary | null>(),
   events: jsonb("events").$type<CallEvent[]>().notNull().default([]),
+  /** Transfer target agreed mid-call, awaiting the resume-webhook dial —
+   *  persisted so it survives a redeploy / lands on any replica. */
+  pendingTransfer: jsonb("pending_transfer").$type<{ name: string; phone: string } | null>(),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   endedAt: timestamp("ended_at", { withTimezone: true }),
   durationSeconds: integer("duration_seconds"),

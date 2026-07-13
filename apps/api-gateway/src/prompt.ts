@@ -146,9 +146,13 @@ export async function getAgentPrompt(centerId: string): Promise<AgentPrompt | nu
   if (isAfterHours(center)) {
     const nightGreeting = center.afterHoursGreeting || defaultAfterHoursGreeting(center.name);
     return {
+      // The live prompt runs message mode with the night greeting, but
+      // `template`/`greeting` stay the stored DAYTIME values the editor
+      // round-trips — otherwise a save made after the cutoff would overwrite
+      // the daytime greeting with the after-hours one.
       prompt: messageModePrompt(center.name, nightGreeting),
       template,
-      greeting: nightGreeting,
+      greeting,
       staff: staffRows,
       center,
       mode: "message",

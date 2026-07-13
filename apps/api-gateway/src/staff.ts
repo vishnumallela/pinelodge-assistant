@@ -247,24 +247,59 @@ function editDistance(a: string, b: string): number {
   return dp[a.length]!;
 }
 
-/** The ASR rarely hands us the exact roster spelling, so resolve generously:
- *  exact name, then first-name/prefix, then a 2-edit fuzzy match, then the
- *  section ("billing" → whoever runs Billing). Active staff only. */
+/** Edit-distance tolerance that scales with the shorter word: short names get
+ *  no slack (so "Lisa" never becomes "Mira"), longer names allow ASR slips. */
+function fuzzyThreshold(len: number): number {
+  if (len <= 4) return 0;
+  if (len <= 7) return 1;
+  return 2;
+}
+
+interface NormedStaff {
+  s: StaffWithAvailability;
+  norm: string;
+  section: string;
+}
+
+/** Within a tier of candidates, an available person always wins over an
+ *  off-shift one with the same spoken name. */
+function preferAvailable(cands: NormedStaff[]): StaffWithAvailability | undefined {
+  return (cands.find((r) => r.s.availableNow) ?? cands[0])?.s;
+}
+
+/** The ASR rarely hands us the exact roster spelling, so resolve in tiers:
+ *  exact name → first-name/prefix → length-scaled fuzzy → section. Within a
+ *  tier, an available person always wins over an off-shift one, and the fuzzy
+ *  tier picks the CLOSEST name, never merely the first. A blank spoken name,
+ *  or a roster name that normalizes to blank, never matches anything. */
 function matchSpokenName(rows: StaffWithAvailability[], spokenName: string) {
   const wanted = normalizeName(spokenName);
   if (!wanted) return undefined;
-  const active = rows.filter((s) => s.active);
-  return (
-    active.find((s) => normalizeName(s.name) === wanted) ??
-    active.find(
-      (s) => normalizeName(s.name).startsWith(wanted) || wanted.startsWith(normalizeName(s.name)),
-    ) ??
-    active.find((s) => {
-      const name = normalizeName(s.name);
-      return Math.min(name.length, wanted.length) >= 3 && editDistance(name, wanted) <= 2;
-    }) ??
-    active.find((s) => normalizeName(s.section) === wanted)
-  );
+  // Precompute normalized names once; drop anyone whose name blanks out so a
+  // non-Latin name can't become a universal prefix match.
+  const active: NormedStaff[] = rows
+    .filter((s) => s.active)
+    .map((s) => ({ s, norm: normalizeName(s.name), section: normalizeName(s.section) }))
+    .filter((r) => r.norm !== "");
+
+  const exact = active.filter((r) => r.norm === wanted);
+  if (exact.length) return preferAvailable(exact);
+
+  const prefix = active.filter((r) => r.norm.startsWith(wanted) || wanted.startsWith(r.norm));
+  if (prefix.length) return preferAvailable(prefix);
+
+  // Fuzzy: keep only names within their length-scaled threshold, then take the
+  // smallest distance (ties broken toward an available person).
+  const scored = active
+    .map((r) => ({ r, d: editDistance(r.norm, wanted) }))
+    .filter((x) => x.d <= fuzzyThreshold(Math.min(x.r.norm.length, wanted.length)))
+    .toSorted((a, b) => a.d - b.d || Number(b.r.s.availableNow) - Number(a.r.s.availableNow));
+  if (scored.length) return scored[0]!.r.s;
+
+  const bySection = active.filter((r) => r.section === wanted);
+  if (bySection.length) return preferAvailable(bySection);
+
+  return undefined;
 }
 
 /** Resolve a spoken staff name to a transferable number within the center.

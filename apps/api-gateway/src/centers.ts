@@ -1,6 +1,6 @@
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { db } from "./db";
-import { centers, staff, staffAssignments, userPrefs, type CenterRow } from "./schema";
+import { calls, centers, staff, staffAssignments, userPrefs, type CenterRow } from "./schema";
 import { toMinutes, zonedNow } from "./staff";
 
 /**
@@ -101,13 +101,26 @@ export async function setCenterNumber(
   return row ?? null;
 }
 
-/** Delete a center. Assignments and settings cascade; calls keep their
- *  center_id as history. People left with no assignment anywhere are removed
- *  too. The last center can never be deleted. */
+/** Delete a center. Assignments and settings cascade; people left with no
+ *  assignment anywhere are removed too. The last center can never be deleted,
+ *  and a center with logged calls can't be deleted either — its call history
+ *  is scoped by center_id and would become permanently unreachable in the
+ *  dashboard (deactivate it instead). */
 export async function deleteCenter(id: string): Promise<{ ok: boolean; error?: string }> {
   const all = await listCenters();
   if (all.length <= 1) return { ok: false, error: "The last center cannot be deleted." };
   if (!all.some((c) => c.id === id)) return { ok: false, error: "Center not found." };
+  const [hasCalls] = await db
+    .select({ one: sql`1` })
+    .from(calls)
+    .where(eq(calls.centerId, id))
+    .limit(1);
+  if (hasCalls) {
+    return {
+      ok: false,
+      error: "This center has call history. Deactivate it instead of deleting.",
+    };
+  }
   await db.delete(centers).where(eq(centers.id, id));
   await db
     .delete(staff)
