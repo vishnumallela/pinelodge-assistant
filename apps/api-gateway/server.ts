@@ -144,7 +144,11 @@ const server = Bun.serve<TwilioSocketData>({
     } else if (path.startsWith("/orpc")) {
       // Typed dashboard API; procedures enforce the admin check via context.
       const user = await sessionUser(req);
-      const context: RpcContext = { admin: Boolean(user), origin: publicUrl(req) };
+      const context: RpcContext = {
+        admin: Boolean(user),
+        userId: user?.id ?? "",
+        origin: publicUrl(req),
+      };
       const { matched, response } = await rpc.handle(req, { prefix: "/orpc", context });
       res = matched && response ? response : json({ error: "Not found" }, 404);
     } else {

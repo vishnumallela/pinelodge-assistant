@@ -1,16 +1,15 @@
 import { createContext, use, useCallback, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { orpc, type Center } from "@/lib/orpc";
 
 /**
  * The selected center — the tenant everything on screen belongs to. The
  * sidebar dropdown sets it; call log, staff, prompt, and new calls all scope
- * to it. Persisted in localStorage so the choice survives reloads; an id
- * that no longer exists falls back to the first center.
+ * to it. The choice is stored server-side per admin (user_prefs), so it
+ * follows them across browsers and devices; a local override makes switching
+ * feel instant while the save is in flight.
  */
-
-const STORAGE_KEY = "pinelodge:center";
 
 interface CenterCtx {
   centers: Center[];
@@ -25,29 +24,36 @@ interface CenterCtx {
 const Ctx = createContext<CenterCtx | null>(null);
 
 export function CenterProvider({ children }: { children: React.ReactNode }) {
+  const qc = useQueryClient();
   const { data: centers = [], isLoading } = useQuery(orpc.centers.list.queryOptions());
+  const { data: selected } = useQuery(orpc.centers.selected.queryOptions());
 
-  const [storedId, setStoredId] = useState<string>(() => {
-    try {
-      return window.localStorage.getItem(STORAGE_KEY) ?? "";
-    } catch {
-      return "";
-    }
-  });
+  // Optimistic: reflect the click immediately, then persist server-side.
+  const [override, setOverride] = useState<string | null>(null);
 
-  const setCenterId = useCallback((id: string) => {
-    setStoredId(id);
-    try {
-      window.localStorage.setItem(STORAGE_KEY, id);
-    } catch {
-      /* private mode / quota — the choice still lives for this session */
-    }
-  }, []);
+  const select = useMutation(
+    orpc.centers.select.mutationOptions({
+      onSettled: () => {
+        void qc.invalidateQueries({ queryKey: orpc.centers.selected.key() });
+      },
+    }),
+  );
+
+  const setCenterId = useCallback(
+    (id: string) => {
+      setOverride(id);
+      select.mutate({ centerId: id });
+    },
+    // useMutation's mutate is a stable reference.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const value = useMemo<CenterCtx>(() => {
-    const center = centers.find((c) => c.id === storedId) ?? centers[0] ?? null;
+    const wantedId = override ?? selected?.id;
+    const center = centers.find((c) => c.id === wantedId) ?? centers[0] ?? null;
     return { centers, center, centerId: center?.id ?? "", setCenterId, isLoading };
-  }, [centers, storedId, setCenterId, isLoading]);
+  }, [centers, selected, override, setCenterId, isLoading]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -1,6 +1,6 @@
 import { and, asc, eq, ne, notExists, sql } from "drizzle-orm";
 import { db } from "./db";
-import { staff, staffAssignments, type CenterRow } from "./schema";
+import { staff, staffAssignments, type CenterRow, type StaffRow } from "./schema";
 
 /**
  * Staff = a person (name, phone, email — shared everywhere) plus one
@@ -295,28 +295,71 @@ function splitInput(input: StaffInput) {
   return { person: { name, phone, email }, assignment };
 }
 
+/** The same human typed in again at another center: matched by email, or by
+ *  name + phone when there is no email. A bare phone match alone is NOT a
+ *  person — different people legitimately share a front-office line. */
+async function findMatchingPerson(person: {
+  name: string;
+  phone: string;
+  email: string;
+}): Promise<StaffRow | null> {
+  if (person.email) {
+    const [byEmail] = await db
+      .select()
+      .from(staff)
+      .where(sql`lower(${staff.email}) = ${person.email.toLowerCase()}`)
+      .limit(1);
+    if (byEmail) return byEmail;
+  }
+  if (person.phone) {
+    const [byNamePhone] = await db
+      .select()
+      .from(staff)
+      .where(
+        and(
+          eq(staff.phone, person.phone),
+          sql`lower(${staff.name}) = ${person.name.toLowerCase()}`,
+        ),
+      )
+      .limit(1);
+    if (byNamePhone) return byNamePhone;
+  }
+  return null;
+}
+
 /** Add someone to a center's roster. With `staffId` an existing person is
- *  attached (their identity fields update to the submitted values); without
- *  it a new person is created. Fails when the person is already on this
- *  center's roster. */
+ *  attached explicitly; without it, someone matching an existing person (same
+ *  email, or same name + phone) is linked automatically instead of duplicated
+ *  — the identity fields update to the submitted values either way. Fails
+ *  when the person is already on this center's roster. */
 export async function createStaff(
   centerId: string,
   input: StaffInput,
   staffId?: string,
 ): Promise<StaffMemberRecord | null> {
   const { person, assignment } = splitInput(input);
-  let personId = staffId;
-  if (personId) {
+  let existing: StaffRow | null = null;
+  if (staffId) {
+    const [byId] = await db.select().from(staff).where(eq(staff.id, staffId)).limit(1);
+    if (!byId) return null;
+    existing = byId;
+  } else {
+    existing = await findMatchingPerson(person);
+  }
+  let personId: string;
+  if (existing) {
     // Reject duplicates before touching the person, so a failed attach
     // never rewrites their shared name/phone/email.
     const [dup] = await db
       .select({ id: staffAssignments.id })
       .from(staffAssignments)
-      .where(and(eq(staffAssignments.staffId, personId), eq(staffAssignments.centerId, centerId)))
+      .where(
+        and(eq(staffAssignments.staffId, existing.id), eq(staffAssignments.centerId, centerId)),
+      )
       .limit(1);
     if (dup) return null;
-    const [updated] = await db.update(staff).set(person).where(eq(staff.id, personId)).returning();
-    if (!updated) return null;
+    await db.update(staff).set(person).where(eq(staff.id, existing.id));
+    personId = existing.id;
   } else {
     const [created] = await db.insert(staff).values(person).returning();
     personId = created!.id;

@@ -1,5 +1,5 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
 import type { ServerWebSocket } from "bun";
+import twilioSdk from "twilio";
 import { endCall as lockCall, logCallEvent, saveTranscript } from "./calls";
 import { findCenterByNumber, getCenter, getDefaultCenter } from "./centers";
 import { db } from "./db";
@@ -45,26 +45,19 @@ function takePendingTransfer(rowId: string): TransferTarget | null {
   return Date.now() - t.at < 5 * 60 * 1000 ? t : null;
 }
 
-/** Twilio request validation: base64(HMAC-SHA1(authToken, url + sorted params)). */
+/** Twilio request validation, via the SDK's X-Twilio-Signature check. */
 function verifyTwilioSignature(
   url: string,
   params: URLSearchParams,
   signature: string | null,
 ): boolean {
   if (!env.TWILIO_AUTH_TOKEN || !signature) return false;
-  const pieces = [...params.entries()]
-    .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([k, v]) => `${k}${v}`)
-    .join("");
-  const expected = createHmac("sha1", env.TWILIO_AUTH_TOKEN)
-    .update(url + pieces)
-    .digest();
-  try {
-    const given = Buffer.from(signature, "base64");
-    return given.length === expected.length && timingSafeEqual(given, expected);
-  } catch {
-    return false;
-  }
+  return twilioSdk.validateRequest(
+    env.TWILIO_AUTH_TOKEN,
+    signature,
+    url,
+    Object.fromEntries(params),
+  );
 }
 
 /** Voice webhook: create the call record and hand Twilio the stream TwiML. */

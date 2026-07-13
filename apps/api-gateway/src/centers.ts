@@ -1,6 +1,6 @@
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { db } from "./db";
-import { centers, staff, staffAssignments, type CenterRow } from "./schema";
+import { centers, staff, staffAssignments, userPrefs, type CenterRow } from "./schema";
 
 /**
  * Centers — the tenant unit. Every center runs the same receptionist with its
@@ -98,6 +98,30 @@ export async function deleteCenter(id: string): Promise<{ ok: boolean; error?: s
       sql`NOT EXISTS (SELECT 1 FROM ${staffAssignments} WHERE ${staffAssignments.staffId} = ${staff.id})`,
     );
   return { ok: true };
+}
+
+/** The center this admin last selected in the dashboard, following them
+ *  across browsers and devices. Falls back to the default center when they
+ *  never picked one or their pick was deleted (the FK nulls it). */
+export async function getSelectedCenter(userId: string): Promise<CenterRow | null> {
+  if (userId) {
+    const [pref] = await db.select().from(userPrefs).where(eq(userPrefs.userId, userId)).limit(1);
+    if (pref?.selectedCenterId) {
+      const center = await getCenter(pref.selectedCenterId);
+      if (center) return center;
+    }
+  }
+  return getDefaultCenter();
+}
+
+export async function setSelectedCenter(userId: string, centerId: string): Promise<void> {
+  await db
+    .insert(userPrefs)
+    .values({ userId, selectedCenterId: centerId, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: userPrefs.userId,
+      set: { selectedCenterId: centerId, updatedAt: new Date() },
+    });
 }
 
 /** Boot: make sure at least one center exists and return the default one.

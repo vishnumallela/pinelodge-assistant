@@ -6,10 +6,12 @@ import {
   deleteCenter,
   getCenter,
   getDefaultCenter,
+  getSelectedCenter,
   isValidTimezone,
   listCenters,
   numberClaimedElsewhere,
   setCenterNumber,
+  setSelectedCenter,
   updateCenter,
 } from "./centers";
 import { env } from "./env";
@@ -44,6 +46,8 @@ import {
 
 export interface RpcContext {
   admin: boolean;
+  /** Better Auth user id of the signed-in admin ("" when unauthenticated). */
+  userId: string;
   origin: string;
 }
 
@@ -133,6 +137,22 @@ async function twilioCall<T>(fn: () => Promise<T>): Promise<T> {
 export const router = {
   centers: {
     list: authed.handler(() => listCenters()),
+
+    /** The signed-in admin's active center — stored server-side so the
+     *  dropdown choice follows them across browsers and devices. */
+    selected: authed.handler(async ({ context }) => {
+      const center = await getSelectedCenter(context.userId);
+      if (!center) throw new ORPCError("NOT_FOUND", { message: "No center is configured." });
+      return center;
+    }),
+
+    select: authed
+      .input(z.object({ centerId: centerIdSchema }))
+      .handler(async ({ input, context }) => {
+        await requireCenter(input.centerId);
+        await setSelectedCenter(context.userId, input.centerId);
+        return { ok: true };
+      }),
 
     create: authed.input(centerFieldsSchema).handler(({ input }) => {
       requireTimezone(input.timezone);

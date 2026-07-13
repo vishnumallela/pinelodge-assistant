@@ -119,6 +119,17 @@ export const staffAssignments = pgTable(
 
 export type StaffAssignmentRow = typeof staffAssignments.$inferSelect;
 
+/** Per-admin dashboard preferences. The selected center lives here so the
+ *  choice follows the admin across browsers and devices. */
+export const userPrefs = pgTable("user_prefs", {
+  /** Better Auth user id (text — the auth service owns the identity). */
+  userId: text("user_id").primaryKey(),
+  selectedCenterId: uuid("selected_center_id").references(() => centers.id, {
+    onDelete: "set null",
+  }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** Per-center key/value settings (prompt template, greeting). */
 export const centerSettings = pgTable(
   "center_settings",

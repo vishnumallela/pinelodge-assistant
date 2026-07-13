@@ -83,6 +83,13 @@ export async function ensureSchema(): Promise<void> {
       PRIMARY KEY (center_id, key)
     )
   `;
+  await client`
+    CREATE TABLE IF NOT EXISTS user_prefs (
+      user_id text PRIMARY KEY,
+      selected_center_id uuid REFERENCES centers(id) ON DELETE SET NULL,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `;
   await client`ALTER TABLE staff ADD COLUMN IF NOT EXISTS phone text NOT NULL DEFAULT ''`;
   await client`ALTER TABLE staff ADD COLUMN IF NOT EXISTS email text NOT NULL DEFAULT ''`;
   await client`ALTER TABLE calls ADD COLUMN IF NOT EXISTS events jsonb NOT NULL DEFAULT '[]'::jsonb`;

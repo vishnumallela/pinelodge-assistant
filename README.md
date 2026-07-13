@@ -22,8 +22,9 @@ apps/
 
 - **Centers (multi-tenant)** — every center is a row in Postgres with its own name,
   timezone, inbound phone number, staff roster, and prompt. The sidebar dropdown picks the
-  active center; the call log, staff page, prompt editor, and new console calls all scope
-  to it. Manage centers at `/centers`. First boot creates a default center from
+  active center — stored server-side per admin, so the choice follows you across browsers —
+  and the call log, staff page, prompt editor, and new console calls all scope to it.
+  Manage centers at `/centers`. First boot creates a default center from
   `FACILITY_NAME`/`FACILITY_TIMEZONE` and migrates any pre-centers data onto it.
 - **Voice pipeline** — the browser fetches a short-lived ephemeral client secret from
   `POST /api/realtime/token`, opens a WebSocket to `wss://api.x.ai/v1/realtime`, streams mic
@@ -32,8 +33,10 @@ apps/
 - **Staff & availability** — a person (name, phone, email) is stored once; each center they
   work at gets its own assignment (section, weekly window, time-off dates, active flag),
   evaluated in that center's timezone. The staff editor's "Person" picker attaches someone
-  who already works at another center without retyping them. Exactly one person per center
-  is the fallback: unplaceable and after-hours calls go there. Edited at `/staff`.
+  who already works at another center without retyping them — and typing them in fresh with
+  the same email (or same name and number) links to the existing person automatically
+  instead of duplicating them. Exactly one person per center is the fallback: unplaceable
+  and after-hours calls go there. Edited at `/staff`.
 - **Prompt** — a template with `{{greeting}} {{staff_directory}} {{unavailable}} {{fallback}}`
   placeholders, stored per center and edited live from the sidebar (Prompt). It renders
   fresh at the start of every call with that center's current availability.
