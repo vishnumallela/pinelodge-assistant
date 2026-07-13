@@ -154,7 +154,7 @@ export async function handleTwilioResume(req: Request, publicOrigin: string): Pr
 interface TwilioStartEvent {
   event: "start";
   streamSid?: string;
-  start?: { streamSid?: string; customParameters?: Record<string, string> };
+  start?: { streamSid?: string; callSid?: string; customParameters?: Record<string, string> };
 }
 interface TwilioMediaEvent {
   event: "media";
@@ -183,6 +183,13 @@ class TwilioBridge {
   private hangupRequested = false;
   private finalized = false;
   private readonly cap: ReturnType<typeof setTimeout>;
+  /** Live-redirect state: the Twilio CallSid (from the stream start event),
+   *  the agreed target, and the fallback timer in case the mark echo — the
+   *  signal that the goodbye audio finished playing — never arrives. */
+  private callSid = "";
+  private transferTarget: TransferTarget | null = null;
+  private transferStarted = false;
+  private transferTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(twilio: TwilioSocket) {
     this.twilio = twilio;
@@ -201,6 +208,7 @@ class TwilioBridge {
       case "start": {
         const start = ev as TwilioStartEvent;
         this.streamSid = start.start?.streamSid ?? start.streamSid ?? "";
+        this.callSid = start.start?.callSid ?? "";
         this.rowId = start.start?.customParameters?.rowId ?? "";
         this.centerId = start.start?.customParameters?.centerId ?? "";
         this.from = start.start?.customParameters?.from ?? "";
@@ -216,12 +224,54 @@ class TwilioBridge {
         }
         break;
       }
+      case "mark":
+        // Twilio echoes the mark once every queued audio before it has
+        // played to the caller — the goodbye is done, transfer now.
+        if (this.transferTarget) void this.executeTransfer();
+        break;
       case "stop":
         this.shutdown();
         break;
       default:
         break;
     }
+  }
+
+  /** Redirect the live call to the target's phone through the REST API —
+   *  immediate, no waiting for stream teardown. Falls back to the old
+   *  close-stream → <Redirect> → <Dial> path if REST isn't possible. */
+  private async executeTransfer(): Promise<void> {
+    if (this.transferStarted || this.finalized) return;
+    this.transferStarted = true;
+    if (this.transferTimer) clearTimeout(this.transferTimer);
+    const target = this.transferTarget;
+    const config = await getConfig();
+    if (target && this.callSid && config.twilioAccountSid && config.twilioAuthToken) {
+      try {
+        const twiml = `<Response><Dial>${target.phone}</Dial></Response>`;
+        await twilioSdk(config.twilioAccountSid, config.twilioAuthToken)
+          .calls(this.callSid)
+          .update({ twiml });
+        if (this.rowId) {
+          await logCallEvent(
+            this.rowId,
+            "dialing transfer",
+            `live redirect to ${target.name} at ${target.phone}`,
+          );
+        }
+      } catch (e) {
+        // REST refused (old creds, mid-hangup) — the stashed pendingTransfer
+        // still dials through the resume webhook when the stream closes.
+        if (this.rowId) {
+          void logCallEvent(
+            this.rowId,
+            "live redirect failed, falling back",
+            e instanceof Error ? e.message.slice(0, 150) : undefined,
+          );
+        }
+      }
+    }
+    this.shutdown();
   }
 
   private async openXai(): Promise<void> {
@@ -277,23 +327,29 @@ class TwilioBridge {
             input: { format: { type: "audio/pcmu" }, transcription: { model: "grok-transcribe" } },
             output: { format: { type: "audio/pcmu" } },
           },
+          // Message mode gets no transfer tool at all — after hours there
+          // is nobody to dial, whatever the model decides.
           tools: [
-            {
-              type: "function",
-              name: "transfer_call",
-              description:
-                "Connect the caller to a staff member's phone. Call this right after you announce the redirect and say goodbye.",
-              parameters: {
-                type: "object",
-                properties: {
-                  name: {
-                    type: "string",
-                    description: "Exact name of the staff member from the directory",
+            ...(mode === "message"
+              ? []
+              : [
+                  {
+                    type: "function",
+                    name: "transfer_call",
+                    description:
+                      "Connect the caller to a staff member's phone. Call this right after you announce the redirect and say goodbye.",
+                    parameters: {
+                      type: "object",
+                      properties: {
+                        name: {
+                          type: "string",
+                          description: "Exact name of the staff member from the directory",
+                        },
+                      },
+                      required: ["name"],
+                    },
                   },
-                },
-                required: ["name"],
-              },
-            },
+                ]),
             {
               type: "function",
               name: "end_call",
@@ -377,7 +433,23 @@ class TwilioBridge {
           break;
         case "response.done":
           // Give the goodbye audio a moment to reach the caller, then end.
-          if (this.hangupRequested) setTimeout(() => this.shutdown(), 3000);
+          // Transfers don't ride on this — their mark echo/timer redirects
+          // the live call and shutting down here would preempt it. The mark
+          // is sent now, behind ALL queued goodbye audio; Twilio echoes it
+          // when that audio has played to the caller.
+          if (this.transferTarget) {
+            if (this.twilio.readyState === 1) {
+              this.twilio.send(
+                JSON.stringify({
+                  event: "mark",
+                  streamSid: this.streamSid,
+                  mark: { name: "transfer-goodbye" },
+                }),
+              );
+            }
+          } else if (this.hangupRequested) {
+            setTimeout(() => this.shutdown(), 3000);
+          }
           break;
         default:
           break;
@@ -436,9 +508,14 @@ class TwilioBridge {
           output: JSON.stringify({ ok: true, connecting: `${target.name} in ${target.section}` }),
         },
       });
-      // Same exit as end_call: after the goodbye plays out, the stream closes
-      // and Twilio's <Redirect> dials the target.
+      // Immediate hand-off: a mark rides behind the queued goodbye audio;
+      // Twilio echoes it the moment that audio has played, and the echo
+      // triggers the live REST redirect. The timer covers a lost echo, and
+      // never racing on response.done fixes transfers that used to hang
+      // until the idle timeout.
       this.hangupRequested = true;
+      this.transferTarget = target;
+      this.transferTimer = setTimeout(() => void this.executeTransfer(), 4000);
     } else {
       if (this.rowId) {
         void logCallEvent(this.rowId, "transfer failed", `asked for "${name}", nobody reachable`);
@@ -481,6 +558,7 @@ class TwilioBridge {
     if (this.finalized) return;
     this.finalized = true;
     clearTimeout(this.cap);
+    if (this.transferTimer) clearTimeout(this.transferTimer);
     try {
       this.xai?.close();
     } catch {
