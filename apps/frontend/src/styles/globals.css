@@ -14,36 +14,36 @@
   /* Reception ledger — warm paper, ink, brass, sage. Warm neutrals carry the
      structure; brass is the scarce accent for live/primary moments; sage marks
      a resolved, summarized call. */
-  --background: #faf8f4; /* bone paper */
-  --foreground: #211c18; /* warm ink */
-  --card: #ffffff; /* slips lift off the paper by tone */
-  --card-foreground: #211c18;
-  --popover: #ffffff;
-  --popover-foreground: #211c18;
-  --primary: #211c18; /* ink — buttons stay crisp/legible */
-  --primary-foreground: #faf8f4;
-  --secondary: #f0ece4;
-  --secondary-foreground: #211c18;
-  --muted: #f0ece4;
-  --muted-foreground: #7c7264;
-  --accent: #efe8dd;
-  --accent-foreground: #211c18;
-  --destructive: #b4442f;
-  --border: #e7e0d3;
-  --input: #e7e0d3;
-  --ring: rgba(154, 106, 47, 0.4);
-  --selection: rgba(154, 106, 47, 0.14);
-  --sidebar: #f5f1ea;
-  --disabled: #efe8dd;
-  --disabled-foreground: #a89c8b;
+  --background: oklch(97.96% 0.0057 84.57); /* bone paper */
+  --foreground: oklch(23.08% 0.0109 60.9); /* warm ink */
+  --card: oklch(100.0% 0.0 89.88); /* slips lift off the paper by tone */
+  --card-foreground: oklch(23.08% 0.0109 60.9);
+  --popover: oklch(100.0% 0.0 89.88);
+  --popover-foreground: oklch(23.08% 0.0109 60.9);
+  --primary: oklch(23.08% 0.0109 60.9); /* ink — buttons stay crisp/legible */
+  --primary-foreground: oklch(97.96% 0.0057 84.57);
+  --secondary: oklch(94.4% 0.0115 84.58);
+  --secondary-foreground: oklch(23.08% 0.0109 60.9);
+  --muted: oklch(94.4% 0.0115 84.58);
+  --muted-foreground: oklch(55.71% 0.0244 76.37);
+  --accent: oklch(93.35% 0.0165 79.35);
+  --accent-foreground: oklch(23.08% 0.0109 60.9);
+  --destructive: oklch(53.67% 0.1501 32.65);
+  --border: oklch(90.87% 0.019 83.06);
+  --input: oklch(90.87% 0.019 83.06);
+  --ring: oklch(56.3% 0.0968 69.01 / 0.4);
+  --selection: oklch(56.3% 0.0968 69.01 / 0.14);
+  --sidebar: oklch(95.93% 0.0103 81.8);
+  --disabled: oklch(93.35% 0.0165 79.35);
+  --disabled-foreground: oklch(69.83% 0.028 76.7);
 
   /* Brass accent + sage semantic */
-  --brand: #9a6a2f;
-  --brand-foreground: #ffffff;
-  --brand-soft: #f3e8d6;
-  --success: #4f6f52;
-  --success-foreground: #ffffff;
-  --success-soft: #e6ede2;
+  --brand: oklch(56.3% 0.0968 69.01);
+  --brand-foreground: oklch(100.0% 0.0 89.88);
+  --brand-soft: oklch(93.49% 0.0267 80.25);
+  --success: oklch(50.84% 0.0587 147.04);
+  --success-foreground: oklch(100.0% 0.0 89.88);
+  --success-soft: oklch(93.78% 0.0164 133.83);
 
   --radius: 0.625rem;
 
