@@ -66,6 +66,10 @@ const staffRoute = createRoute({
 const centersRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/centers",
+  // ?edit=<centerId> opens that center's editor on arrival (deep link from
+  // the Phone line page's "Manage" buttons).
+  validateSearch: (s: Record<string, unknown>): { edit?: string } =>
+    typeof s.edit === "string" ? { edit: s.edit } : {},
   component: CentersPage,
 });
 

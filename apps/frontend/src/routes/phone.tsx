@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { motion } from "framer-motion";
 import { Check, Copy, PhoneCall } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { useCenter } from "@/lib/center";
 import { orpc, type PhoneConfig } from "@/lib/orpc";
 import { AGENT_NAME } from "@/lib/receptionist-agent";
 
@@ -66,10 +67,52 @@ export function PhonePage() {
           transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
           className="mt-8 space-y-6"
         >
+          <CenterLines />
           <TwilioSection config={config} />
         </motion.div>
       </div>
     </main>
+  );
+}
+
+/** Every center's inbound line, with a straight path to buy, attach, or
+ *  change it — the actual controls live in the center's editor. */
+function CenterLines() {
+  const { centers } = useCenter();
+  const navigate = useNavigate();
+  return (
+    <section className="rounded-2xl border border-border/70 bg-card p-6 shadow-card">
+      <h2 className="text-[15px] font-medium text-foreground">Center lines</h2>
+      <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+        The dialed number decides which center answers. Manage a line to search and buy a new
+        number, attach one the Twilio account already owns, or type one in.
+      </p>
+      <div className="mt-4 space-y-1.5">
+        {centers.map((c) => (
+          <div
+            key={c.id}
+            className="flex items-center justify-between gap-3 rounded-lg border border-border/70 px-3 py-2"
+          >
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13.5px] font-medium text-foreground">
+                {c.name}
+              </span>
+              <span className="block text-[12.5px] tabular-nums text-muted-foreground">
+                {c.phoneNumber || "No number yet"}
+              </span>
+            </span>
+            {!c.phoneNumber && <Badge variant="muted">Not receiving calls</Badge>}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void navigate({ to: "/centers", search: { edit: c.id } })}
+            >
+              {c.phoneNumber ? "Change number" : "Set up number"}
+            </Button>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 

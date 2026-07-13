@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearch } from "@tanstack/react-router";
 import { motion } from "framer-motion";
 import { Building2, Pencil, PhoneCall, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -62,6 +63,19 @@ export function CentersPage() {
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<Center | null>(null);
+
+  // Deep link: /centers?edit=<id> (from the Phone line page) opens that
+  // center's editor as soon as the list is in.
+  const search = useSearch({ strict: false }) as { edit?: string };
+  useEffect(() => {
+    if (!search.edit || editorOpen) return;
+    const target = centers.find((c) => c.id === search.edit);
+    if (target) {
+      setEditing(target);
+      setEditorOpen(true);
+    }
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [search.edit, centers]);
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: orpc.centers.list.key() });
@@ -146,13 +160,22 @@ export function CentersPage() {
                     <span className="text-[12.5px] text-muted-foreground">{row.timezone}</span>
                   </TableCell>
                   <TableCell>
-                    {row.phoneNumber ? (
-                      <span className="whitespace-nowrap text-[12.5px] tabular-nums text-foreground">
-                        {row.phoneNumber}
-                      </span>
-                    ) : (
-                      <span className="text-[12px] text-muted-foreground/60">not set</span>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => openEdit(row)}
+                      title="Configure this center's number"
+                      className="tap text-left"
+                    >
+                      {row.phoneNumber ? (
+                        <span className="whitespace-nowrap text-[12.5px] tabular-nums text-foreground pf-hover:text-brand">
+                          {row.phoneNumber}
+                        </span>
+                      ) : (
+                        <span className="text-[12px] text-brand underline-offset-2 pf-hover:underline">
+                          Set up number
+                        </span>
+                      )}
+                    </button>
                   </TableCell>
                   <TableCell>
                     {row.active ? (
