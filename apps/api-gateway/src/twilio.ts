@@ -2,7 +2,7 @@ import type { ServerWebSocket } from "bun";
 import twilioSdk from "twilio";
 import { getConfig } from "./app-config";
 import { endCall as lockCall, logCallEvent, saveTranscript } from "./calls";
-import { findCenterByNumber, getCenter, getDefaultCenter } from "./centers";
+import { findCenterByNumber, getCenter, getDefaultCenter, isAfterHours } from "./centers";
 import { db } from "./db";
 import { getAgentPrompt, PHONE_TRANSFER_APPENDIX } from "./prompt";
 import { enqueueSummary, enqueueTransferEmail } from "./queue";
@@ -81,14 +81,22 @@ export async function handleTwilioIncoming(req: Request, publicOrigin: string): 
   if (!center) {
     return Response.json({ error: "No center is configured." }, { status: 503 });
   }
+  // Past the center's cutoff the whole call is a message: message-only
+  // prompt, no transfers, triaged on the Messages page next morning.
+  const afterHours = isAfterHours(center);
   const [row] = await db
     .insert(calls)
-    .values({ userId: `phone:${from}`, centerId: center.id })
+    .values({
+      userId: `phone:${from}`,
+      centerId: center.id,
+      kind: afterHours ? "message" : "standard",
+      triage: afterHours ? "open" : "none",
+    })
     .returning();
   await logCallEvent(
     row!.id,
     "call created",
-    `twilio webhook from ${from} to ${to || "unknown"} (${center.name})`,
+    `twilio webhook from ${from} to ${to || "unknown"} (${center.name}${afterHours ? ", after hours" : ""})`,
   );
   const streamUrl = `${publicOrigin.replace(/^http/, "ws")}/api/twilio/stream`;
   // When the stream closes, TwiML continues to <Redirect>: the resume handler
@@ -232,7 +240,7 @@ class TwilioBridge {
       this.shutdown();
       return;
     }
-    const { prompt, greeting } = agent;
+    const { prompt, greeting, mode } = agent;
     const config = await getConfig();
     const params = new URLSearchParams({
       model: config.grokRealtimeModel,
@@ -253,7 +261,8 @@ class TwilioBridge {
         session: {
           type: "realtime",
           voice: config.grokRealtimeVoice,
-          instructions: `${prompt}\n\n${PHONE_TRANSFER_APPENDIX}`,
+          // Message mode has no transfer path — the appendix would fight it.
+          instructions: mode === "message" ? prompt : `${prompt}\n\n${PHONE_TRANSFER_APPENDIX}`,
           reasoning: { effort: "none" },
           turn_detection: {
             type: "server_vad",

@@ -202,7 +202,11 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       void qc.invalidateQueries({ queryKey: orpc.calls.list.key() });
       await navigate({ to: "/calls/$callId", params: { callId: call.id } });
       await agent.connect({
-        instructions: `${agentPrompt.prompt}\n\n${CONSOLE_TRANSFER_APPENDIX}`,
+        // After-hours message mode has no transfer path — no appendix.
+        instructions:
+          agentPrompt.mode === "message"
+            ? agentPrompt.prompt
+            : `${agentPrompt.prompt}\n\n${CONSOLE_TRANSFER_APPENDIX}`,
         greeting: agentPrompt.greeting,
       });
     } catch (e) {

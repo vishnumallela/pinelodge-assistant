@@ -46,11 +46,22 @@ export const centers = pgTable("centers", {
   /** Twilio IncomingPhoneNumber SID when the number is managed from the app. */
   twilioNumberSid: text("twilio_number_sid").notNull().default(""),
   active: boolean("active").notNull().default(true),
+  /** After the cutoff, callers hear the staff-has-left greeting and the call
+   *  becomes message-only — no transfers, reviewed on the Messages page. */
+  afterHoursEnabled: boolean("after_hours_enabled").notNull().default(false),
+  /** "HH:MM" in the center's timezone; the window may span midnight. */
+  afterHoursStart: text("after_hours_start").notNull().default("16:30"),
+  afterHoursEnd: text("after_hours_end").notNull().default("08:00"),
+  /** Spoken after-hours opener; empty = generated from the center name. */
+  afterHoursGreeting: text("after_hours_greeting").notNull().default(""),
   sort: integer("sort").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export type CenterRow = typeof centers.$inferSelect;
+
+export type CallKind = "standard" | "message";
+export type TriageStatus = "none" | "open" | "done";
 
 export const calls = pgTable("calls", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -60,6 +71,10 @@ export const calls = pgTable("calls", {
    *  boot migration backfills them to the default center. */
   centerId: uuid("center_id"),
   status: text("status").$type<CallStatus>().notNull().default("active"),
+  /** "message" = taken on the after-hours message-only pathway. */
+  kind: text("kind").$type<CallKind>().notNull().default("standard"),
+  /** Triage state for message calls ("none" on standard calls). */
+  triage: text("triage").$type<TriageStatus>().notNull().default("none"),
   transcript: jsonb("transcript").$type<TranscriptTurn[]>().notNull().default([]),
   summary: jsonb("summary").$type<CallSummary | null>(),
   events: jsonb("events").$type<CallEvent[]>().notNull().default([]),

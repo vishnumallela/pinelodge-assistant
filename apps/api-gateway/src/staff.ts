@@ -86,7 +86,10 @@ export async function seedDefaultStaff(centerId: string): Promise<void> {
 }
 
 /** Current date parts in the given IANA timezone. */
-function zonedNow(timezone: string, now: Date): { day: number; minutes: number; date: string } {
+export function zonedNow(
+  timezone: string,
+  now: Date,
+): { day: number; minutes: number; date: string } {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
     weekday: "short",
@@ -107,7 +110,7 @@ function zonedNow(timezone: string, now: Date): { day: number; minutes: number; 
   };
 }
 
-function toMinutes(hhmm: string): number {
+export function toMinutes(hhmm: string): number {
   const [h = 0, m = 0] = hhmm.split(":").map(Number);
   return h * 60 + m;
 }
@@ -221,6 +224,49 @@ export interface TransferTarget {
   email: string;
 }
 
+function normalizeName(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Small edit distance for speech-recognition slips ("Caring" → "Karin"). */
+function editDistance(a: string, b: string): number {
+  const dp = Array.from({ length: a.length + 1 }, (_, i) => i);
+  for (let j = 1; j <= b.length; j++) {
+    let prev = dp[0]!;
+    dp[0] = j;
+    for (let i = 1; i <= a.length; i++) {
+      const cur = dp[i]!;
+      dp[i] = Math.min(dp[i]! + 1, dp[i - 1]! + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+  }
+  return dp[a.length]!;
+}
+
+/** The ASR rarely hands us the exact roster spelling, so resolve generously:
+ *  exact name, then first-name/prefix, then a 2-edit fuzzy match, then the
+ *  section ("billing" → whoever runs Billing). Active staff only. */
+function matchSpokenName(rows: StaffWithAvailability[], spokenName: string) {
+  const wanted = normalizeName(spokenName);
+  if (!wanted) return undefined;
+  const active = rows.filter((s) => s.active);
+  return (
+    active.find((s) => normalizeName(s.name) === wanted) ??
+    active.find(
+      (s) => normalizeName(s.name).startsWith(wanted) || wanted.startsWith(normalizeName(s.name)),
+    ) ??
+    active.find((s) => {
+      const name = normalizeName(s.name);
+      return Math.min(name.length, wanted.length) >= 3 && editDistance(name, wanted) <= 2;
+    }) ??
+    active.find((s) => normalizeName(s.section) === wanted)
+  );
+}
+
 /** Resolve a spoken staff name to a transferable number within the center.
  *  The person must be active, on shift right now, and have a phone; otherwise
  *  fall back to the center's starred fallback (if reachable). Returns null
@@ -230,8 +276,7 @@ export async function findTransferTarget(
   center: CenterRow,
 ): Promise<TransferTarget | null> {
   const rows = await listStaff(center);
-  const wanted = spokenName.trim().toLowerCase();
-  const match = rows.find((s) => s.name.toLowerCase() === wanted && s.active);
+  const match = matchSpokenName(rows, spokenName);
   if (match?.availableNow && match.phone) {
     return { name: match.name, section: match.section, phone: match.phone, email: match.email };
   }
@@ -253,8 +298,7 @@ export async function findRedirectTarget(
   center: CenterRow,
 ): Promise<TransferTarget | null> {
   const rows = await listStaff(center);
-  const wanted = spokenName.trim().toLowerCase();
-  const match = rows.find((s) => s.name.toLowerCase() === wanted && s.active);
+  const match = matchSpokenName(rows, spokenName);
   if (match?.availableNow) {
     return { name: match.name, section: match.section, phone: match.phone, email: match.email };
   }

@@ -8,13 +8,23 @@ import {
   saveConfig,
   XAI_SUMMARY_MODELS,
 } from "./app-config";
-import { createCall, endCall, getCall, listCallsPage, logCallEvent, saveTranscript } from "./calls";
+import {
+  createCall,
+  endCall,
+  getCall,
+  listCallsPage,
+  listMessagesPage,
+  logCallEvent,
+  saveTranscript,
+  setTriage,
+} from "./calls";
 import {
   createCenter,
   deleteCenter,
   getCenter,
   getDefaultCenter,
   getSelectedCenter,
+  isAfterHours,
   isValidTimezone,
   listCenters,
   numberClaimedElsewhere,
@@ -92,9 +102,17 @@ const staffInputSchema = z.object({
   sort: z.number().int().optional(),
 });
 
+const hhmmSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+
 const centerFieldsSchema = z.object({
   name: z.string().trim().min(1),
   timezone: z.string().trim().min(1),
+  /** After-hours protocol: past the cutoff, callers hear the staff-has-left
+   *  greeting and the call becomes message-only. */
+  afterHoursEnabled: z.boolean().optional(),
+  afterHoursStart: hhmmSchema.optional(),
+  afterHoursEnd: hhmmSchema.optional(),
+  afterHoursGreeting: z.string().trim().max(500).optional(),
 });
 
 async function requireCenter(centerId: string): Promise<CenterRow> {
@@ -273,8 +291,13 @@ export const router = {
 
     create: authed.input(z.object({ centerId: centerIdSchema })).handler(async ({ input }) => {
       const center = await requireCenter(input.centerId);
-      const call = await createCall("console", center.id);
-      await logCallEvent(call.id, "call created", `console (${center.name})`);
+      const afterHours = isAfterHours(center);
+      const call = await createCall("console", center.id, afterHours ? "message" : "standard");
+      await logCallEvent(
+        call.id,
+        "call created",
+        `console (${center.name}${afterHours ? ", after hours" : ""})`,
+      );
       return call;
     }),
 
@@ -335,6 +358,29 @@ export const router = {
           center: { name: center.name, timezone: center.timezone },
         });
         return { ok: true as const, connecting: `${target.name} in ${target.section}` };
+      }),
+  },
+
+  /** The after-hours inbox — every message-only call across all centers,
+   *  so a platform-level person (Dessa) triages both facilities in one
+   *  place each morning. */
+  messages: {
+    list: authed
+      .input(
+        z.object({
+          page: z.number().int().min(1).default(1),
+          pageSize: z.number().int().min(5).max(100).default(20),
+          onlyOpen: z.boolean().default(false),
+        }),
+      )
+      .handler(({ input }) => listMessagesPage(input.page, input.pageSize, input.onlyOpen)),
+
+    setTriage: authed
+      .input(z.object({ id: z.string().uuid(), triage: z.enum(["open", "done"]) }))
+      .handler(async ({ input }) => {
+        const ok = await setTriage(input.id, input.triage);
+        if (!ok) throw new ORPCError("NOT_FOUND", { message: "Message not found." });
+        return { ok: true };
       }),
   },
 

@@ -1,6 +1,13 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "./db";
-import { calls, type CallRow, type CallSummary, type TranscriptTurn } from "./schema";
+import {
+  calls,
+  centers,
+  type CallKind,
+  type CallRow,
+  type CallSummary,
+  type TranscriptTurn,
+} from "./schema";
 
 /**
  * Admin data layer: every call belongs to a center. The userId column records
@@ -8,9 +15,61 @@ import { calls, type CallRow, type CallSummary, type TranscriptTurn } from "./sc
  * read center-scoped, matching the dashboard's center dropdown.
  */
 
-export async function createCall(source: string, centerId: string): Promise<CallRow> {
-  const [row] = await db.insert(calls).values({ userId: source, centerId }).returning();
+export async function createCall(
+  source: string,
+  centerId: string,
+  kind: CallKind = "standard",
+): Promise<CallRow> {
+  const [row] = await db
+    .insert(calls)
+    .values({ userId: source, centerId, kind, triage: kind === "message" ? "open" : "none" })
+    .returning();
   return row!;
+}
+
+/** Newest-first page of after-hours messages across ALL centers — the
+ *  morning triage inbox is deliberately not center-scoped. */
+export async function listMessagesPage(
+  page: number,
+  pageSize: number,
+  onlyOpen: boolean,
+): Promise<{ calls: (CallRow & { centerName: string })[]; total: number; openCount: number }> {
+  const where = onlyOpen
+    ? and(eq(calls.kind, "message"), eq(calls.triage, "open"))
+    : eq(calls.kind, "message");
+  const [rows, [count], [open]] = await Promise.all([
+    db
+      .select({ call: calls, centerName: centers.name })
+      .from(calls)
+      .leftJoin(centers, eq(calls.centerId, centers.id))
+      .where(where)
+      .orderBy(desc(calls.createdAt))
+      .limit(pageSize)
+      .offset((page - 1) * pageSize),
+    db
+      .select({ total: sql<number>`count(*)::int` })
+      .from(calls)
+      .where(where),
+    db
+      .select({ total: sql<number>`count(*)::int` })
+      .from(calls)
+      .where(and(eq(calls.kind, "message"), eq(calls.triage, "open"))),
+  ]);
+  return {
+    calls: rows.map((r) => ({ ...r.call, centerName: r.centerName ?? "Unknown center" })),
+    total: count?.total ?? 0,
+    openCount: open?.total ?? 0,
+  };
+}
+
+/** Dessa's triage flip: open ↔ done. Only message calls carry a state. */
+export async function setTriage(id: string, triage: "open" | "done"): Promise<boolean> {
+  const res = await db
+    .update(calls)
+    .set({ triage })
+    .where(and(eq(calls.id, id), eq(calls.kind, "message")))
+    .returning({ id: calls.id });
+  return res.length > 0;
 }
 
 /** Newest-first page of one center's log plus the total, for server-side

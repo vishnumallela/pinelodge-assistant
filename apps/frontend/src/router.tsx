@@ -14,6 +14,7 @@ import { LedgerPage } from "@/routes/ledger";
 import { CallPage } from "@/routes/call";
 import { StaffPage } from "@/routes/staff";
 import { CentersPage } from "@/routes/centers";
+import { MessagesPage } from "@/routes/messages";
 import { PhonePage } from "@/routes/phone";
 import { SettingsPage } from "@/routes/settings";
 import { LoginPage } from "@/routes/login";
@@ -80,6 +81,12 @@ const settingsRoute = createRoute({
   component: SettingsPage,
 });
 
+const messagesRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/messages",
+  component: MessagesPage,
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
   appRoute.addChildren([
@@ -89,6 +96,7 @@ const routeTree = rootRoute.addChildren([
     centersRoute,
     phoneRoute,
     settingsRoute,
+    messagesRoute,
   ]),
 ]);
 

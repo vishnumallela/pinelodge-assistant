@@ -5,6 +5,7 @@ import {
   Building2,
   Check,
   ChevronsUpDown,
+  Inbox,
   LogOut,
   Menu,
   PhoneForwarded,
@@ -28,6 +29,7 @@ import { VoiceSettingsProvider } from "@/lib/voice-settings";
 
 const NAV = [
   { label: "Call log", to: "/", icon: ScrollText },
+  { label: "Messages", to: "/messages", icon: Inbox },
   { label: "Staff", to: "/staff", icon: Users },
   { label: "Centers", to: "/centers", icon: Building2 },
   { label: "Phone line", to: "/phone", icon: PhoneForwarded },

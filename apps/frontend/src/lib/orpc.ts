@@ -35,6 +35,7 @@ export type PhoneConfig = Awaited<ReturnType<typeof client.phone.config>>;
 export type OwnedNumber = Awaited<ReturnType<typeof client.phone.numbers.list>>[number];
 export type AvailableNumber = Awaited<ReturnType<typeof client.phone.numbers.search>>[number];
 export type SettingsField = Awaited<ReturnType<typeof client.settings.get>>[number];
+export type MessageCall = Awaited<ReturnType<typeof client.messages.list>>["calls"][number];
 
 /** Human label for where a call came from. */
 export function callSource(call: Pick<Call, "userId">): string {

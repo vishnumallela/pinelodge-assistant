@@ -101,6 +101,12 @@ export async function ensureSchema(): Promise<void> {
   await client`ALTER TABLE staff ADD COLUMN IF NOT EXISTS email text NOT NULL DEFAULT ''`;
   await client`ALTER TABLE calls ADD COLUMN IF NOT EXISTS events jsonb NOT NULL DEFAULT '[]'::jsonb`;
   await client`ALTER TABLE calls ADD COLUMN IF NOT EXISTS center_id uuid`;
+  await client`ALTER TABLE calls ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'standard'`;
+  await client`ALTER TABLE calls ADD COLUMN IF NOT EXISTS triage text NOT NULL DEFAULT 'none'`;
+  await client`ALTER TABLE centers ADD COLUMN IF NOT EXISTS after_hours_enabled boolean NOT NULL DEFAULT false`;
+  await client`ALTER TABLE centers ADD COLUMN IF NOT EXISTS after_hours_start text NOT NULL DEFAULT '16:30'`;
+  await client`ALTER TABLE centers ADD COLUMN IF NOT EXISTS after_hours_end text NOT NULL DEFAULT '08:00'`;
+  await client`ALTER TABLE centers ADD COLUMN IF NOT EXISTS after_hours_greeting text NOT NULL DEFAULT ''`;
   await client`CREATE INDEX IF NOT EXISTS calls_center_created_idx ON calls (center_id, created_at DESC)`;
 
   await migrateToCenters();

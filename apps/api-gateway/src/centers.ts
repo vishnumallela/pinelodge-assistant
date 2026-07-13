@@ -1,6 +1,7 @@
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { db } from "./db";
 import { centers, staff, staffAssignments, userPrefs, type CenterRow } from "./schema";
+import { toMinutes, zonedNow } from "./staff";
 
 /**
  * Centers — the tenant unit. Every center runs the same receptionist with its
@@ -41,7 +42,23 @@ export interface CenterInput {
   name: string;
   timezone: string;
   active?: boolean;
+  afterHoursEnabled?: boolean;
+  afterHoursStart?: string;
+  afterHoursEnd?: string;
+  afterHoursGreeting?: string;
   sort?: number;
+}
+
+/** True when the center's after-hours window covers this moment (evaluated
+ *  in the center's timezone; the window may span midnight — 16:30 → 08:00). */
+export function isAfterHours(center: CenterRow, now = new Date()): boolean {
+  if (!center.afterHoursEnabled) return false;
+  const t = zonedNow(center.timezone, now);
+  const start = toMinutes(center.afterHoursStart);
+  const end = toMinutes(center.afterHoursEnd);
+  if (start === end) return false;
+  if (start < end) return t.minutes >= start && t.minutes < end;
+  return t.minutes >= start || t.minutes < end;
 }
 
 /** IANA zone check — Intl throws on unknown zones. */

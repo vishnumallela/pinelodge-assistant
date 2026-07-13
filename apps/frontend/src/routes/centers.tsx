@@ -19,6 +19,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
   TableBody,
@@ -227,6 +228,17 @@ function CenterEditor({
   const [timezone, setTimezone] = useState(editing?.timezone ?? "America/Chicago");
   const [active, setActive] = useState(editing?.active ?? true);
   const [phoneNumber, setPhoneNumber] = useState(editing?.phoneNumber ?? "");
+  const [ahEnabled, setAhEnabled] = useState(editing?.afterHoursEnabled ?? false);
+  const [ahStart, setAhStart] = useState(editing?.afterHoursStart ?? "16:30");
+  const [ahEnd, setAhEnd] = useState(editing?.afterHoursEnd ?? "08:00");
+  const [ahGreeting, setAhGreeting] = useState(editing?.afterHoursGreeting ?? "");
+
+  const afterHoursFields = {
+    afterHoursEnabled: ahEnabled,
+    afterHoursStart: ahStart,
+    afterHoursEnd: ahEnd,
+    afterHoursGreeting: ahGreeting.trim(),
+  };
   // Creating only: the line picked in the one-step flow (attach or buy).
   const [line, setLine] = useState<{ attachSid?: string; buyNumber?: string } | null>(null);
 
@@ -239,6 +251,7 @@ function CenterEditor({
               name: name.trim(),
               timezone: timezone.trim(),
               active,
+              ...afterHoursFields,
               // Only send the number when it was hand-edited, so app-managed
               // Twilio numbers (buy/attach) keep their stored SID.
               ...(phoneNumber.trim() === editing.phoneNumber
@@ -249,6 +262,7 @@ function CenterEditor({
         : orpc.centers.create.call({
             name: name.trim(),
             timezone: timezone.trim(),
+            ...afterHoursFields,
             ...(line?.attachSid ? { attachSid: line.attachSid } : {}),
             ...(line?.buyNumber ? { buyNumber: line.buyNumber } : {}),
             ...(!line && phoneNumber.trim() ? { phoneNumber: phoneNumber.trim() } : {}),
@@ -306,6 +320,60 @@ function CenterEditor({
             <p className="text-[12px] text-muted-foreground">
               Staff schedules and availability at this center evaluate in this timezone.
             </p>
+          </div>
+
+          <div className="space-y-4 rounded-xl border border-border/70 bg-background p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-[13.5px] font-medium text-foreground">After-hours messages</p>
+                <p className="text-[12.5px] text-muted-foreground">
+                  Past the cutoff, callers hear that staff has left for the day and Sarah only takes
+                  a message — reviewed on the Messages page each morning.
+                </p>
+              </div>
+              <Switch
+                checked={ahEnabled}
+                onCheckedChange={setAhEnabled}
+                aria-label="After-hours messages"
+              />
+            </div>
+            {ahEnabled && (
+              <>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="center-ah-start">Starts</Label>
+                    <Input
+                      id="center-ah-start"
+                      type="time"
+                      value={ahStart}
+                      onChange={(e) => setAhStart(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="center-ah-end">Ends (next morning)</Label>
+                    <Input
+                      id="center-ah-end"
+                      type="time"
+                      value={ahEnd}
+                      onChange={(e) => setAhEnd(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="center-ah-greeting">After-hours greeting</Label>
+                  <Textarea
+                    id="center-ah-greeting"
+                    rows={3}
+                    value={ahGreeting}
+                    onChange={(e) => setAhGreeting(e.target.value)}
+                    placeholder={`Thank you for calling ${name.trim() || "the center"}, this is Sarah. Our staff has left for the day and will reach out first thing tomorrow morning — may I take a message?`}
+                  />
+                  <p className="text-[12px] text-muted-foreground">
+                    Spoken verbatim when a call comes in after hours. Leave empty for the default.
+                  </p>
+                </div>
+              </>
+            )}
           </div>
 
           {!editing && (
