@@ -45,6 +45,8 @@ const COMMON_TIMEZONES = [
   "Europe/London",
 ];
 
+const isE164 = (v: string) => v.trim() === "" || /^\+[1-9]\d{6,14}$/.test(v.trim());
+
 /** Every IANA zone the browser knows, common ones first — a strict dropdown,
  *  so an unparseable zone can never be submitted. */
 const ALL_TIMEZONES: string[] = (() => {
@@ -251,12 +253,14 @@ function CenterEditor({
   const [timezone, setTimezone] = useState(editing?.timezone ?? "America/Chicago");
   const [active, setActive] = useState(editing?.active ?? true);
   const [phoneNumber, setPhoneNumber] = useState(editing?.phoneNumber ?? "");
+  const [fallbackNumber, setFallbackNumber] = useState(editing?.fallbackNumber ?? "");
   const [ahEnabled, setAhEnabled] = useState(editing?.afterHoursEnabled ?? false);
   const [ahStart, setAhStart] = useState(editing?.afterHoursStart ?? "16:30");
   const [ahEnd, setAhEnd] = useState(editing?.afterHoursEnd ?? "08:00");
   const [ahGreeting, setAhGreeting] = useState(editing?.afterHoursGreeting ?? "");
 
   const afterHoursFields = {
+    fallbackNumber: fallbackNumber.trim(),
     afterHoursEnabled: ahEnabled,
     afterHoursStart: ahStart,
     afterHoursEnd: ahEnd,
@@ -304,8 +308,8 @@ function CenterEditor({
     onError: (e) => toast.error(e.message),
   });
 
-  const phoneOk = phoneNumber.trim() === "" || /^\+[1-9]\d{6,14}$/.test(phoneNumber.trim());
-  const valid = name.trim() !== "" && timezone.trim() !== "" && phoneOk;
+  const valid =
+    name.trim() !== "" && timezone.trim() !== "" && isE164(phoneNumber) && isE164(fallbackNumber);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -342,6 +346,21 @@ function CenterEditor({
             </Select>
             <p className="text-[12px] text-muted-foreground">
               Staff schedules and availability at this center evaluate in this timezone.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="center-fallback">Default transfer number (E.164)</Label>
+            <Input
+              id="center-fallback"
+              value={fallbackNumber}
+              onChange={(e) => setFallbackNumber(e.target.value)}
+              placeholder="+19035008221"
+            />
+            <p className="text-[12px] text-muted-foreground">
+              Always-reachable last resort. When no staff member is on shift to take a call, Sarah
+              connects the caller to this number instead of dropping them. Leave empty to have her
+              take a message.
             </p>
           </div>
 

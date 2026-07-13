@@ -107,6 +107,8 @@ const hhmmSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 const centerFieldsSchema = z.object({
   name: z.string().trim().min(1),
   timezone: z.string().trim().min(1),
+  /** Last-resort dial when no staff is reachable — the guaranteed default. */
+  fallbackNumber: phoneSchema.optional(),
   /** After-hours protocol: past the cutoff, callers hear the staff-has-left
    *  greeting and the call becomes message-only. */
   afterHoursEnabled: z.boolean().optional(),

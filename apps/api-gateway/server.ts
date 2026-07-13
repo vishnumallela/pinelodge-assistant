@@ -1,6 +1,6 @@
 import { RPCHandler } from "@orpc/server/fetch";
 import { getConfig, pruneOrphanSettings } from "./src/app-config";
-import { findStuckSummarizing, sweepStaleActiveCalls } from "./src/calls";
+import { finalizeOrphanedCalls, findStuckSummarizing } from "./src/calls";
 import { requireDefaultCenter } from "./src/centers";
 import { ensureSchema } from "./src/db";
 import { env } from "./src/env";
@@ -23,13 +23,20 @@ await seedDefaultStaff(defaultCenter.id);
 startSummaryWorker();
 startTransferEmailWorker();
 
-// Repair calls a previous run left dangling: phone rows whose stream never
-// connected (stuck 'active'), and rows locked to 'summarizing' whose summary
-// job was lost (re-enqueue so they finish instead of hanging forever).
+// Repair calls a previous run left dangling. Every 'active' call at boot is
+// orphaned (its bridge process is gone — usually a redeploy mid-call), so
+// finalize each and summarize it; a real conversation still gets its summary
+// instead of hanging active with none. Also re-enqueue any row stuck in
+// 'summarizing' whose summary job was lost.
 void (async () => {
   try {
-    await sweepStaleActiveCalls();
-    for (const call of await findStuckSummarizing()) await enqueueSummary({ callId: call.id });
+    const orphaned = await finalizeOrphanedCalls();
+    const stuck = await findStuckSummarizing();
+    const seen = new Set(orphaned.map((c) => c.id));
+    for (const call of [...orphaned, ...stuck.filter((c) => !seen.has(c.id))]) {
+      await enqueueSummary({ callId: call.id });
+    }
+    if (orphaned.length) console.log(`[api-gateway] finalized ${orphaned.length} orphaned call(s)`);
   } catch (e) {
     console.error("[api-gateway] boot repair failed:", e instanceof Error ? e.message : e);
   }

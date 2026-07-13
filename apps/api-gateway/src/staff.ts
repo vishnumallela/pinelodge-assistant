@@ -316,14 +316,26 @@ export async function findTransferTarget(
     return { name: match.name, section: match.section, phone: match.phone, email: match.email };
   }
   const fallback = rows.find((s) => s.isFallback && s.active && s.availableNow && s.phone);
-  return fallback
-    ? {
-        name: fallback.name,
-        section: fallback.section,
-        phone: fallback.phone,
-        email: fallback.email,
-      }
-    : null;
+  if (fallback) {
+    return {
+      name: fallback.name,
+      section: fallback.section,
+      phone: fallback.phone,
+      email: fallback.email,
+    };
+  }
+  // Last resort: the center's default number, so a caller is never dropped
+  // when no staff (not even the starred fallback) is reachable. No email —
+  // it's a plain line, not a person.
+  if (center.fallbackNumber) {
+    return {
+      name: "the front desk",
+      section: center.name,
+      phone: center.fallbackNumber,
+      email: "",
+    };
+  }
+  return null;
 }
 
 /** Console variant of findTransferTarget: the redirect is announce-only (no

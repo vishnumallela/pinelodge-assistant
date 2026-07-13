@@ -75,17 +75,20 @@ export async function reconcileCallKind(id: string, mode: "standard" | "message"
     .where(and(eq(calls.id, id), ne(calls.kind, kind), ne(calls.triage, "done")));
 }
 
-/** Boot sweep: a phone row whose media stream never delivered a start event
- *  (dropped upgrade, caller hung up before connect) stays 'active' forever.
- *  Fail anything active well past the bridge's own 10-minute cap so the log
- *  never shows a phantom in-progress call. */
-export async function sweepStaleActiveCalls(): Promise<void> {
-  await db
+/** Boot sweep: after a restart, every 'active' call is orphaned — the bridge
+ *  process that held its WebSocket is gone, so it can never finalize itself.
+ *  A redeploy mid-call is the common cause. Finalize each one: lock it and
+ *  (if it captured any speech) send it to summarizing so a real conversation
+ *  still gets its summary instead of hanging active forever. A 90-second
+ *  floor leaves a genuinely-live console call alone. Returns the rows that
+ *  now need a summary job (empty ones summarize to a 'no speech' note, same
+ *  as any empty call). */
+export async function finalizeOrphanedCalls(): Promise<CallRow[]> {
+  return db
     .update(calls)
-    .set({ status: "failed" })
-    .where(
-      and(eq(calls.status, "active"), lt(calls.createdAt, new Date(Date.now() - 15 * 60_000))),
-    );
+    .set({ status: "summarizing", endedAt: new Date() })
+    .where(and(eq(calls.status, "active"), lt(calls.createdAt, new Date(Date.now() - 90_000))))
+    .returning();
 }
 
 /** Re-drivable summary state: a row stuck in 'summarizing' (enqueue lost, or

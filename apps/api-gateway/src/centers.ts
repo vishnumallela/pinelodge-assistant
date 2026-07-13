@@ -42,6 +42,7 @@ export interface CenterInput {
   name: string;
   timezone: string;
   active?: boolean;
+  fallbackNumber?: string;
   afterHoursEnabled?: boolean;
   afterHoursStart?: string;
   afterHoursEnd?: string;

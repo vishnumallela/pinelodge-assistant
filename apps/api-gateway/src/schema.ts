@@ -45,6 +45,10 @@ export const centers = pgTable("centers", {
   phoneNumber: text("phone_number").notNull().default(""),
   /** Twilio IncomingPhoneNumber SID when the number is managed from the app. */
   twilioNumberSid: text("twilio_number_sid").notNull().default(""),
+  /** E.164 dialed as a last resort when NO staff (not even the starred
+   *  fallback) is reachable — the guaranteed default so a caller is never
+   *  dropped. Empty = no safety net (agent takes a message instead). */
+  fallbackNumber: text("fallback_number").notNull().default(""),
   active: boolean("active").notNull().default(true),
   /** After the cutoff, callers hear the staff-has-left greeting and the call
    *  becomes message-only — no transfers, reviewed on the Messages page. */
