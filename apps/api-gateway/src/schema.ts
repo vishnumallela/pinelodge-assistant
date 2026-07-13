@@ -119,6 +119,14 @@ export const staffAssignments = pgTable(
 
 export type StaffAssignmentRow = typeof staffAssignments.$inferSelect;
 
+/** Global application settings (xAI, Twilio, SMTP…), editable in the
+ *  dashboard. A row overrides the matching env var; no row = env fallback. */
+export const appSettings = pgTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").$type<unknown>().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** Per-admin dashboard preferences. The selected center lives here so the
  *  choice follows the admin across browsers and devices. */
 export const userPrefs = pgTable("user_prefs", {

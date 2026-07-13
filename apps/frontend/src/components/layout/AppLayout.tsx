@@ -9,6 +9,7 @@ import {
   Menu,
   PhoneForwarded,
   ScrollText,
+  Settings,
   SlidersHorizontal,
   Users,
 } from "lucide-react";
@@ -30,6 +31,7 @@ const NAV = [
   { label: "Staff", to: "/staff", icon: Users },
   { label: "Centers", to: "/centers", icon: Building2 },
   { label: "Phone line", to: "/phone", icon: PhoneForwarded },
+  { label: "Settings", to: "/settings", icon: Settings },
 ] as const;
 
 const iconBtn =

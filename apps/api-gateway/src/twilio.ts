@@ -1,9 +1,9 @@
 import type { ServerWebSocket } from "bun";
 import twilioSdk from "twilio";
+import { getConfig } from "./app-config";
 import { endCall as lockCall, logCallEvent, saveTranscript } from "./calls";
 import { findCenterByNumber, getCenter, getDefaultCenter } from "./centers";
 import { db } from "./db";
-import { env } from "./env";
 import { getAgentPrompt, PHONE_TRANSFER_APPENDIX } from "./prompt";
 import { enqueueSummary, enqueueTransferEmail } from "./queue";
 import { calls, type CenterRow, type TranscriptTurn } from "./schema";
@@ -24,8 +24,9 @@ import { findTransferTarget, type TransferTarget } from "./staff";
  * enqueues — identical lifecycle to console calls.
  */
 
-export function twilioEnabled(): boolean {
-  return Boolean(env.TWILIO_AUTH_TOKEN && env.XAI_API_KEY);
+export async function twilioEnabled(): Promise<boolean> {
+  const config = await getConfig();
+  return Boolean(config.twilioAuthToken && config.xaiApiKey);
 }
 
 /** Transfers agreed mid-call, consumed by the resume webhook after the
@@ -46,25 +47,21 @@ function takePendingTransfer(rowId: string): TransferTarget | null {
 }
 
 /** Twilio request validation, via the SDK's X-Twilio-Signature check. */
-function verifyTwilioSignature(
+async function verifyTwilioSignature(
   url: string,
   params: URLSearchParams,
   signature: string | null,
-): boolean {
-  if (!env.TWILIO_AUTH_TOKEN || !signature) return false;
-  return twilioSdk.validateRequest(
-    env.TWILIO_AUTH_TOKEN,
-    signature,
-    url,
-    Object.fromEntries(params),
-  );
+): Promise<boolean> {
+  const { twilioAuthToken } = await getConfig();
+  if (!twilioAuthToken || !signature) return false;
+  return twilioSdk.validateRequest(twilioAuthToken, signature, url, Object.fromEntries(params));
 }
 
 /** Voice webhook: create the call record and hand Twilio the stream TwiML. */
 export async function handleTwilioIncoming(req: Request, publicOrigin: string): Promise<Response> {
-  if (!twilioEnabled()) {
+  if (!(await twilioEnabled())) {
     return Response.json(
-      { error: "Twilio bridge is not configured (set TWILIO_AUTH_TOKEN)." },
+      { error: "Twilio bridge is not configured (add the Twilio auth token in Settings)." },
       { status: 503 },
     );
   }
@@ -72,7 +69,7 @@ export async function handleTwilioIncoming(req: Request, publicOrigin: string): 
   const rawBody = await req.text();
   const params = new URLSearchParams(rawBody);
   const url = `${publicOrigin}${reqUrl.pathname}${reqUrl.search}`;
-  if (!verifyTwilioSignature(url, params, req.headers.get("x-twilio-signature"))) {
+  if (!(await verifyTwilioSignature(url, params, req.headers.get("x-twilio-signature")))) {
     return Response.json({ error: "Invalid Twilio signature." }, { status: 401 });
   }
   const from = params.get("From") ?? "unknown";
@@ -113,14 +110,14 @@ export async function handleTwilioIncoming(req: Request, publicOrigin: string): 
 /** After the stream ends: connect the caller to the transfer target, if the
  *  agent arranged one, otherwise end the call. */
 export async function handleTwilioResume(req: Request, publicOrigin: string): Promise<Response> {
-  if (!twilioEnabled()) {
+  if (!(await twilioEnabled())) {
     return Response.json({ error: "Twilio bridge is not configured." }, { status: 503 });
   }
   const reqUrl = new URL(req.url);
   const rawBody = await req.text();
   const params = new URLSearchParams(rawBody);
   const url = `${publicOrigin}${reqUrl.pathname}${reqUrl.search}`;
-  if (!verifyTwilioSignature(url, params, req.headers.get("x-twilio-signature"))) {
+  if (!(await verifyTwilioSignature(url, params, req.headers.get("x-twilio-signature")))) {
     return Response.json({ error: "Invalid Twilio signature." }, { status: 401 });
   }
   const rowId = reqUrl.searchParams.get("rowId") ?? "";
@@ -236,12 +233,13 @@ class TwilioBridge {
       return;
     }
     const { prompt, greeting } = agent;
+    const config = await getConfig();
     const params = new URLSearchParams({
-      model: env.GROK_REALTIME_MODEL,
+      model: config.grokRealtimeModel,
       "reasoning.effort": "none",
     });
     const xai = new WebSocket(`wss://api.x.ai/v1/realtime?${params.toString()}`, {
-      headers: { authorization: `Bearer ${env.XAI_API_KEY}` },
+      headers: { authorization: `Bearer ${config.xaiApiKey}` },
     } as unknown as string[]);
     this.xai = xai;
 
@@ -254,7 +252,7 @@ class TwilioBridge {
         type: "session.update",
         session: {
           type: "realtime",
-          voice: env.GROK_REALTIME_VOICE,
+          voice: config.grokRealtimeVoice,
           instructions: `${prompt}\n\n${PHONE_TRANSFER_APPENDIX}`,
           reasoning: { effort: "none" },
           turn_detection: {

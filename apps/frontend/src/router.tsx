@@ -15,6 +15,7 @@ import { CallPage } from "@/routes/call";
 import { StaffPage } from "@/routes/staff";
 import { CentersPage } from "@/routes/centers";
 import { PhonePage } from "@/routes/phone";
+import { SettingsPage } from "@/routes/settings";
 import { LoginPage } from "@/routes/login";
 
 interface RouterContext {
@@ -73,9 +74,22 @@ const phoneRoute = createRoute({
   component: PhonePage,
 });
 
+const settingsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/settings",
+  component: SettingsPage,
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
-  appRoute.addChildren([indexRoute, callRoute, staffRoute, centersRoute, phoneRoute]),
+  appRoute.addChildren([
+    indexRoute,
+    callRoute,
+    staffRoute,
+    centersRoute,
+    phoneRoute,
+    settingsRoute,
+  ]),
 ]);
 
 export const router = createRouter({

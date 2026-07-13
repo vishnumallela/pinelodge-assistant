@@ -104,15 +104,15 @@ function TwilioSection({ config }: { config: PhoneConfig | undefined }) {
 
       <ol className="mt-6 space-y-3">
         <Step n={1}>
-          Set your Twilio Auth Token as{" "}
-          <code className="rounded bg-secondary px-1.5 py-0.5 text-[12px]">TWILIO_AUTH_TOKEN</code>{" "}
-          on the api-gateway.
+          Add your Twilio Auth Token in{" "}
+          <Link to="/settings" className="text-brand underline-offset-2 pf-hover:underline">
+            Settings
+          </Link>
+          .
         </Step>
         <Step n={2}>
-          Optionally add{" "}
-          <code className="rounded bg-secondary px-1.5 py-0.5 text-[12px]">TWILIO_ACCOUNT_SID</code>{" "}
-          too — then each center can search, buy, and wire up its number from the Centers page with
-          no Twilio console work.
+          Add the Account SID there too — then each center can search, buy, and wire up its number
+          from the Centers page with no Twilio console work.
           {t?.numbersEnabled === true && " (Detected — number management is on.)"}
         </Step>
         <Step n={3}>

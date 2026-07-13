@@ -1,4 +1,5 @@
 import { RPCHandler } from "@orpc/server/fetch";
+import { getConfig } from "./src/app-config";
 import { requireDefaultCenter } from "./src/centers";
 import { ensureSchema } from "./src/db";
 import { env } from "./src/env";
@@ -69,12 +70,13 @@ async function sessionUser(req: Request): Promise<{ id: string } | null> {
  *  Grok voice WebSocket without ever seeing our standard API key. */
 async function mintVoiceToken(userId: string): Promise<Response> {
   void userId;
-  if (!env.XAI_API_KEY) {
-    return json({ error: "XAI_API_KEY is not set. Add it to .env and restart." }, 500);
+  const config = await getConfig();
+  if (!config.xaiApiKey) {
+    return json({ error: "The xAI API key is not set. Add it in Settings." }, 500);
   }
   const r = await fetch("https://api.x.ai/v1/realtime/client_secrets", {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${env.XAI_API_KEY}` },
+    headers: { "content-type": "application/json", authorization: `Bearer ${config.xaiApiKey}` },
     body: JSON.stringify({ expires_after: { seconds: 600 } }),
   });
   const text = await r.text();
@@ -96,7 +98,7 @@ async function mintVoiceToken(userId: string): Promise<Response> {
     (typeof data.client_secret === "string" ? data.client_secret : undefined);
   const token = String(candidate ?? "").replace(/^xai-client-secret\./, "");
   if (!token) return json({ error: "Could not parse token from provider." }, 502);
-  return json({ token, model: env.GROK_REALTIME_MODEL, voice: env.GROK_REALTIME_VOICE });
+  return json({ token, model: config.grokRealtimeModel, voice: config.grokRealtimeVoice });
 }
 
 /** Public URL of this deployment, from proxy headers (Railway) or the request. */
@@ -123,7 +125,9 @@ const server = Bun.serve<TwilioSocketData>({
 
     // Twilio media stream: upgrade before any session/CORS handling.
     if (path === "/api/twilio/stream") {
-      if (!twilioEnabled()) return json({ error: "Twilio bridge is not configured." }, 503);
+      if (!(await twilioEnabled())) {
+        return json({ error: "Twilio bridge is not configured." }, 503);
+      }
       if (srv.upgrade(req, { data: { bridge: null } })) return undefined as unknown as Response;
       return json({ error: "Expected a WebSocket upgrade." }, 400);
     }
@@ -134,7 +138,7 @@ const server = Bun.serve<TwilioSocketData>({
       res = json({
         ok: true,
         service: "api-gateway",
-        twilio: twilioEnabled(),
+        twilio: await twilioEnabled(),
       });
     } else if (path === "/api/twilio/incoming" && req.method === "POST") {
       // Authenticated by X-Twilio-Signature, not by a browser session.

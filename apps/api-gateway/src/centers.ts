@@ -133,16 +133,18 @@ export async function requireDefaultCenter(): Promise<CenterRow> {
   return center;
 }
 
-/** True when another center (not `exceptId`) already claims this number. */
+/** True when another center (not `exceptId`) already claims this number.
+ *  Without `exceptId` — e.g. while creating a center — any claim counts. */
 export async function numberClaimedElsewhere(
   phoneNumber: string,
-  exceptId: string,
+  exceptId?: string,
 ): Promise<boolean> {
   if (!phoneNumber.trim()) return false;
+  const matches = eq(centers.phoneNumber, phoneNumber.trim());
   const [row] = await db
     .select({ id: centers.id })
     .from(centers)
-    .where(and(eq(centers.phoneNumber, phoneNumber.trim()), ne(centers.id, exceptId)))
+    .where(exceptId ? and(matches, ne(centers.id, exceptId)) : matches)
     .limit(1);
   return Boolean(row);
 }

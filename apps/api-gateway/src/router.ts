@@ -1,5 +1,6 @@
 import { ORPCError, os } from "@orpc/server";
 import { z } from "zod";
+import { describeConfig, getConfig, saveConfig } from "./app-config";
 import { createCall, endCall, getCall, listCallsPage, logCallEvent, saveTranscript } from "./calls";
 import {
   createCenter,
@@ -14,7 +15,6 @@ import {
   setSelectedCenter,
   updateCenter,
 } from "./centers";
-import { env } from "./env";
 import { defaultGreeting, defaultTemplate, getAgentPrompt, saveTemplate } from "./prompt";
 import { enqueueSummary, enqueueTransferEmail } from "./queue";
 import type { CenterRow } from "./schema";
@@ -154,10 +154,63 @@ export const router = {
         return { ok: true };
       }),
 
-    create: authed.input(centerFieldsSchema).handler(({ input }) => {
-      requireTimezone(input.timezone);
-      return createCenter(input);
-    }),
+    /** One-step creation: optionally give the center its line right away —
+     *  a hand-typed number, an owned Twilio number to attach, or a catalog
+     *  number to buy. Attach/buy point the voice webhook here automatically,
+     *  so the new center answers calls with zero Twilio console work. */
+    create: authed
+      .input(
+        centerFieldsSchema.extend({
+          phoneNumber: phoneSchema.optional(),
+          attachSid: z.string().trim().min(1).optional(),
+          buyNumber: phoneSchema.optional(),
+        }),
+      )
+      .handler(async ({ input, context }) => {
+        requireTimezone(input.timezone);
+        const { phoneNumber, attachSid, buyNumber, ...fields } = input;
+
+        // Resolve the line first, so a Twilio failure never leaves a
+        // half-configured center behind.
+        let line: { phoneNumber: string; sid: string } | null = null;
+        if (buyNumber) {
+          const bought = await twilioCall(() =>
+            purchaseNumber({
+              phoneNumber: buyNumber,
+              voiceUrl: webhookUrl(context.origin),
+              friendlyName: fields.name,
+            }),
+          );
+          line = { phoneNumber: bought.phoneNumber, sid: bought.sid };
+        } else if (attachSid) {
+          const owned = await twilioCall(() => listOwnedNumbers());
+          const number = owned.find((n) => n.sid === attachSid);
+          if (!number) throw new ORPCError("NOT_FOUND", { message: "Number not found." });
+          if (await numberClaimedElsewhere(number.phoneNumber)) {
+            throw new ORPCError("CONFLICT", {
+              message: "Another center already uses that number.",
+            });
+          }
+          const configured = await twilioCall(() =>
+            configureNumber(attachSid, {
+              voiceUrl: webhookUrl(context.origin),
+              friendlyName: fields.name,
+            }),
+          );
+          line = { phoneNumber: configured.phoneNumber, sid: configured.sid };
+        } else if (phoneNumber) {
+          if (await numberClaimedElsewhere(phoneNumber)) {
+            throw new ORPCError("CONFLICT", {
+              message: "Another center already uses that number.",
+            });
+          }
+          line = { phoneNumber, sid: "" };
+        }
+
+        const center = await createCenter(fields);
+        if (!line) return center;
+        return (await setCenterNumber(center.id, line.phoneNumber, line.sid)) ?? center;
+      }),
 
     update: authed
       .input(
@@ -343,17 +396,62 @@ export const router = {
       }),
   },
 
+  settings: {
+    /** Every configurable value with its effective state; secrets masked to
+     *  a set/unset flag. */
+    get: authed.handler(() => describeConfig()),
+    /** Save dashboard edits — applies to the next call, no restart. An empty
+     *  string (or null) reverts the key to its env/default fallback. */
+    save: authed
+      .input(
+        z.object({
+          xaiApiKey: z.string().trim().nullable().optional(),
+          grokRealtimeModel: z.string().trim().nullable().optional(),
+          grokRealtimeVoice: z.string().trim().nullable().optional(),
+          xaiSummaryModel: z.string().trim().nullable().optional(),
+          twilioAccountSid: z.string().trim().nullable().optional(),
+          twilioAuthToken: z.string().trim().nullable().optional(),
+          smtpHost: z.string().trim().nullable().optional(),
+          smtpPort: z.number().int().positive().nullable().optional(),
+          smtpSecure: z.boolean().nullable().optional(),
+          smtpUser: z.string().trim().nullable().optional(),
+          smtpPass: z.string().nullable().optional(),
+          smtpAuthMethod: z.enum(["login", "plain"]).nullable().optional(),
+          emailFrom: z.string().trim().nullable().optional(),
+          appUrl: z
+            .string()
+            .trim()
+            .url()
+            .transform((s) => s.replace(/\/$/, ""))
+            .or(z.literal(""))
+            .nullable()
+            .optional(),
+        }),
+      )
+      .handler(async ({ input }) => {
+        await saveConfig(input);
+        return describeConfig();
+      }),
+  },
+
   phone: {
-    config: authed.handler(({ context }) => ({
-      twilio: {
-        enabled: twilioEnabled(),
-        hasApiKey: Boolean(env.XAI_API_KEY),
-        /** Number management needs TWILIO_ACCOUNT_SID on top of the token. */
-        numbersEnabled: twilioNumbersEnabled(),
-        voiceWebhookUrl: webhookUrl(context.origin),
-        streamUrl: `${context.origin.replace(/^http/, "ws")}/api/twilio/stream`,
-      },
-    })),
+    config: authed.handler(async ({ context }) => {
+      const [enabled, numbersEnabled, config] = await Promise.all([
+        twilioEnabled(),
+        twilioNumbersEnabled(),
+        getConfig(),
+      ]);
+      return {
+        twilio: {
+          enabled,
+          hasApiKey: Boolean(config.xaiApiKey),
+          /** Number management needs the Account SID on top of the token. */
+          numbersEnabled,
+          voiceWebhookUrl: webhookUrl(context.origin),
+          streamUrl: `${context.origin.replace(/^http/, "ws")}/api/twilio/stream`,
+        },
+      };
+    }),
 
     numbers: {
       /** Every number the Twilio account owns, tagged with the center that

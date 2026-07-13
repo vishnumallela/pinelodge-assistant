@@ -20,6 +20,11 @@ apps/
                  (Redis), Twilio bridge webhook + agent + number management
 ```
 
+- **Settings in the dashboard** — xAI keys/models, Twilio credentials, and SMTP/email are
+  edited at `/settings`, stored in Postgres, and applied to the next call with no redeploy.
+  Env vars remain the fallback for anything not saved there (and bootstrap fresh deploys);
+  only infrastructure — database, Redis, ports, auth service, admin allowlist — stays
+  env-only.
 - **Centers (multi-tenant)** — every center is a row in Postgres with its own name,
   timezone, inbound phone number, staff roster, and prompt. The sidebar dropdown picks the
   active center — stored server-side per admin, so the choice follows you across browsers —
@@ -55,12 +60,13 @@ apps/
 Each center gets its own inbound number; the dialed number (`To`) routes the call to that
 center's prompt and roster. Unmatched numbers land on the default (first) center.
 
-**Managed from the app** — set `TWILIO_AUTH_TOKEN` + `TWILIO_ACCOUNT_SID` on the
-api-gateway, then on `/centers` → edit a center: assign a number the account already owns,
-or search by area code and buy one. Buying and attaching point the number's voice webhook
-at this deployment automatically; re-sync, detach, and release are one click each.
+**Managed from the app** — add the Twilio Auth Token + Account SID in `/settings`, then
+give a center its number right in the create dialog (or later from its editor): assign a
+number the account already owns, or search by area code and buy one. Buying and attaching
+point the number's voice webhook at this deployment automatically; re-sync, detach, and
+release are one click each.
 
-**Manual** — with only `TWILIO_AUTH_TOKEN` set:
+**Manual** — with only the auth token set:
 
 1. Buy a voice number in the Twilio Console.
 2. Point the number's "A call comes in" webhook (HTTP POST) at this deployment's

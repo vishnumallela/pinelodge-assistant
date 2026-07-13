@@ -1,4 +1,4 @@
-import { env } from "./env";
+import { getConfig } from "./app-config";
 import type { CallSummary, TranscriptTurn } from "./schema";
 
 /**
@@ -57,15 +57,16 @@ function renderTranscript(transcript: TranscriptTurn[]): string {
 }
 
 async function completeSummary(system: string, transcript: TranscriptTurn[]): Promise<CallSummary> {
-  if (!env.XAI_API_KEY) throw new Error("XAI_API_KEY is not set");
+  const config = await getConfig();
+  if (!config.xaiApiKey) throw new Error("The xAI API key is not set (Settings, or XAI_API_KEY).");
   const res = await fetch(CHAT_URL, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${env.XAI_API_KEY}`,
+      authorization: `Bearer ${config.xaiApiKey}`,
     },
     body: JSON.stringify({
-      model: env.XAI_SUMMARY_MODEL,
+      model: config.xaiSummaryModel,
       temperature: 0.2,
       messages: [
         { role: "system", content: system },

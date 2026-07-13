@@ -215,6 +215,8 @@ function CenterEditor({
   const [timezone, setTimezone] = useState(editing?.timezone ?? "America/Chicago");
   const [active, setActive] = useState(editing?.active ?? true);
   const [phoneNumber, setPhoneNumber] = useState(editing?.phoneNumber ?? "");
+  // Creating only: the line picked in the one-step flow (attach or buy).
+  const [line, setLine] = useState<{ attachSid?: string; buyNumber?: string } | null>(null);
 
   const save = useMutation({
     mutationFn: () =>
@@ -232,11 +234,23 @@ function CenterEditor({
                 : { phoneNumber: phoneNumber.trim() }),
             },
           })
-        : orpc.centers.create.call({ name: name.trim(), timezone: timezone.trim() }),
+        : orpc.centers.create.call({
+            name: name.trim(),
+            timezone: timezone.trim(),
+            ...(line?.attachSid ? { attachSid: line.attachSid } : {}),
+            ...(line?.buyNumber ? { buyNumber: line.buyNumber } : {}),
+            ...(!line && phoneNumber.trim() ? { phoneNumber: phoneNumber.trim() } : {}),
+          }),
     onSuccess: () => {
       onSaved();
       onOpenChange(false);
-      toast.success(editing ? "Center updated." : "Center created. Now add its staff and number.");
+      toast.success(
+        editing
+          ? "Center updated."
+          : line
+            ? "Center created with its number wired up. Switch to it and add staff."
+            : "Center created. Add its staff and number when ready.",
+      );
     },
     onError: (e) => toast.error(e.message),
   });
@@ -288,6 +302,39 @@ function CenterEditor({
             </p>
           </div>
 
+          {!editing && (
+            <div className="space-y-4 rounded-xl border border-brand/25 bg-background p-4">
+              <div className="flex items-center gap-2">
+                <PhoneCall className="size-4 text-brand" />
+                <p className="text-[13.5px] font-medium text-foreground">
+                  Phone line <span className="font-normal text-muted-foreground">(optional)</span>
+                </p>
+              </div>
+              <p className="text-[12px] leading-relaxed text-muted-foreground">
+                Give the center its number now and it answers calls the moment it's created — the
+                voice webhook is wired up automatically. You can also do this later from the
+                center's editor.
+              </p>
+              {numbersEnabled ? (
+                <LinePicker line={line} onPick={setLine} />
+              ) : (
+                <div className="space-y-1.5">
+                  <Label htmlFor="center-phone-create">Number (E.164)</Label>
+                  <Input
+                    id="center-phone-create"
+                    value={phoneNumber}
+                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    placeholder="+19547023000"
+                  />
+                  <p className="text-[12px] text-muted-foreground">
+                    For numbers wired up in the Twilio console by hand. Add the Twilio Account SID
+                    in Settings to search and buy numbers from here instead.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           {editing && (
             <div className="flex items-center justify-between gap-4 rounded-xl border border-border/70 bg-background p-4">
               <div>
@@ -326,8 +373,8 @@ function CenterEditor({
                 <NumberManager center={editing} onChanged={onSaved} />
               ) : (
                 <p className="rounded-lg bg-secondary/50 px-3 py-2 text-[12px] leading-relaxed text-muted-foreground">
-                  Set TWILIO_ACCOUNT_SID (next to TWILIO_AUTH_TOKEN) on the api-gateway to search,
-                  buy, and wire up numbers from here.
+                  Add the Twilio Account SID and Auth Token in Settings to search, buy, and wire up
+                  numbers from here.
                 </p>
               )}
             </div>
@@ -352,6 +399,127 @@ function CenterEditor({
 }
 
 const fail = (e: Error) => toast.error(e.message);
+
+/** Pick a line while creating a center: an unassigned owned number, or a
+ *  catalog number to buy. Nothing touches Twilio until the center saves. */
+function LinePicker({
+  line,
+  onPick,
+}: {
+  line: { attachSid?: string; buyNumber?: string } | null;
+  onPick: (line: { attachSid?: string; buyNumber?: string } | null) => void;
+}) {
+  const { data: owned } = useQuery(orpc.phone.numbers.list.queryOptions());
+  const unassigned = (owned ?? []).filter((n) => n.center === null);
+  const [areaCode, setAreaCode] = useState("");
+  const [results, setResults] = useState<AvailableNumber[]>([]);
+
+  const search = useMutation({
+    mutationFn: () =>
+      orpc.phone.numbers.search.call({
+        country: "US",
+        ...(areaCode.trim() ? { areaCode: areaCode.trim() } : {}),
+      }),
+    onSuccess: setResults,
+    onError: fail,
+  });
+
+  if (line) {
+    const label = line.buyNumber ?? unassigned.find((n) => n.sid === line.attachSid)?.phoneNumber;
+    return (
+      <div className="flex items-center justify-between gap-2 rounded-lg border border-brand/40 bg-brand-soft/40 px-3 py-2">
+        <span className="text-[13px] text-foreground">
+          {line.buyNumber ? "Will buy " : "Will use "}
+          <span className="tabular-nums">{label ?? "selected number"}</span>
+          {" and point its webhook here."}
+        </span>
+        <Button variant="ghost" size="sm" onClick={() => onPick(null)}>
+          Change
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {unassigned.length > 0 && (
+        <div className="space-y-1.5">
+          <Label>Numbers already on the Twilio account</Label>
+          <div className="space-y-1.5">
+            {unassigned.map((n) => (
+              <div
+                key={n.sid}
+                className="flex items-center justify-between gap-2 rounded-lg border border-border/70 px-3 py-2"
+              >
+                <span className="min-w-0">
+                  <span className="block text-[13px] tabular-nums text-foreground">
+                    {n.phoneNumber}
+                  </span>
+                  <span className="block truncate text-[11.5px] text-muted-foreground">
+                    {n.friendlyName || "unnamed"}
+                  </span>
+                </span>
+                <Button variant="outline" size="sm" onClick={() => onPick({ attachSid: n.sid })}>
+                  Use this number
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-1.5">
+        <Label htmlFor="create-number-area">Buy a new number</Label>
+        <div className="flex items-center gap-2">
+          <Input
+            id="create-number-area"
+            value={areaCode}
+            onChange={(e) => setAreaCode(e.target.value)}
+            placeholder="Area code, e.g. 954"
+            className="max-w-45"
+          />
+          <Button
+            variant="outline"
+            disabled={search.isPending}
+            onClick={() => search.mutate()}
+            aria-label="Search numbers"
+          >
+            <Search className="size-3.5" /> {search.isPending ? "Searching…" : "Search"}
+          </Button>
+        </div>
+        {results.length > 0 && (
+          <div className="mt-2 space-y-1.5">
+            {results.slice(0, 8).map((n) => (
+              <div
+                key={n.phoneNumber}
+                className="flex items-center justify-between gap-2 rounded-lg border border-border/70 px-3 py-2"
+              >
+                <span className="min-w-0">
+                  <span className="block text-[13px] tabular-nums text-foreground">
+                    {n.friendlyName || n.phoneNumber}
+                  </span>
+                  <span className="block truncate text-[11.5px] text-muted-foreground">
+                    {[n.locality, n.region].filter(Boolean).join(", ") || "US"}
+                  </span>
+                </span>
+                <Button
+                  size="sm"
+                  onClick={() => onPick({ buyNumber: n.phoneNumber })}
+                  className="bg-brand text-brand-foreground pf-hover:bg-brand/90"
+                >
+                  Choose
+                </Button>
+              </div>
+            ))}
+            <p className="text-[11.5px] text-muted-foreground">
+              The purchase happens when the center saves; it charges the Twilio account.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 /** Twilio number controls for one center: assign an owned number, search and
  *  buy a new one, keep the webhook pointed here, or let the number go. */

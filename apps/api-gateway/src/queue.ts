@@ -91,7 +91,7 @@ export interface TransferEmailJob {
 /** Fire-and-forget from the live call path: never throws, only logs. */
 export async function enqueueTransferEmail(job: TransferEmailJob): Promise<void> {
   try {
-    if (!emailEnabled()) {
+    if (!(await emailEnabled())) {
       await logCallEvent(job.callId, "transfer email skipped", "SMTP is not configured");
       return;
     }
