@@ -501,18 +501,37 @@ const fail = (e: Error) => toast.error(e.message);
 
 /** Pick a line while creating a center: an unassigned owned number, or a
  *  catalog number to buy. Nothing touches Twilio until the center saves. */
-function LinePicker({
-  line,
-  onPick,
+function NumberRow({
+  primary,
+  secondary,
+  action,
 }: {
-  line: { attachSid?: string; buyNumber?: string } | null;
-  onPick: (line: { attachSid?: string; buyNumber?: string } | null) => void;
+  primary: string;
+  secondary: string;
+  action: React.ReactNode;
 }) {
-  const { data: owned } = useQuery(orpc.phone.numbers.list.queryOptions());
-  const unassigned = (owned ?? []).filter((n) => n.center === null);
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-lg border border-border/70 px-3 py-2">
+      <span className="min-w-0">
+        <span className="block text-[13px] tabular-nums text-foreground">{primary}</span>
+        <span className="block truncate text-[11.5px] text-muted-foreground">{secondary}</span>
+      </span>
+      {action}
+    </div>
+  );
+}
+
+function NumberSearch({
+  id,
+  note,
+  action,
+}: {
+  id: string;
+  note: string;
+  action: (n: AvailableNumber, clear: () => void) => React.ReactNode;
+}) {
   const [areaCode, setAreaCode] = useState("");
   const [results, setResults] = useState<AvailableNumber[]>([]);
-
   const search = useMutation({
     mutationFn: () =>
       orpc.phone.numbers.search.call({
@@ -522,6 +541,52 @@ function LinePicker({
     onSuccess: setResults,
     onError: fail,
   });
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>Buy a new number</Label>
+      <div className="flex items-center gap-2">
+        <Input
+          id={id}
+          value={areaCode}
+          onChange={(e) => setAreaCode(e.target.value)}
+          placeholder="Area code, e.g. 954"
+          className="max-w-45"
+        />
+        <Button
+          variant="outline"
+          disabled={search.isPending}
+          onClick={() => search.mutate()}
+          aria-label="Search numbers"
+        >
+          <Search className="size-3.5" /> {search.isPending ? "Searching…" : "Search"}
+        </Button>
+      </div>
+      {results.length > 0 && (
+        <div className="mt-2 space-y-1.5">
+          {results.slice(0, 8).map((n) => (
+            <NumberRow
+              key={n.phoneNumber}
+              primary={n.friendlyName || n.phoneNumber}
+              secondary={[n.locality, n.region].filter(Boolean).join(", ") || "US"}
+              action={action(n, () => setResults([]))}
+            />
+          ))}
+          <p className="text-[11.5px] text-muted-foreground">{note}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LinePicker({
+  line,
+  onPick,
+}: {
+  line: { attachSid?: string; buyNumber?: string } | null;
+  onPick: (line: { attachSid?: string; buyNumber?: string } | null) => void;
+}) {
+  const { data: owned } = useQuery(orpc.phone.numbers.list.queryOptions());
+  const unassigned = (owned ?? []).filter((n) => n.center === null);
 
   if (line) {
     const label = line.buyNumber ?? unassigned.find((n) => n.sid === line.attachSid)?.phoneNumber;
@@ -546,76 +611,31 @@ function LinePicker({
           <Label>Numbers already on the Twilio account</Label>
           <div className="space-y-1.5">
             {unassigned.map((n) => (
-              <div
+              <NumberRow
                 key={n.sid}
-                className="flex items-center justify-between gap-2 rounded-lg border border-border/70 px-3 py-2"
-              >
-                <span className="min-w-0">
-                  <span className="block text-[13px] tabular-nums text-foreground">
-                    {n.phoneNumber}
-                  </span>
-                  <span className="block truncate text-[11.5px] text-muted-foreground">
-                    {n.friendlyName || "unnamed"}
-                  </span>
-                </span>
-                <Button variant="outline" size="sm" onClick={() => onPick({ attachSid: n.sid })}>
-                  Use this number
-                </Button>
-              </div>
+                primary={n.phoneNumber}
+                secondary={n.friendlyName || "unnamed"}
+                action={
+                  <Button variant="outline" size="sm" onClick={() => onPick({ attachSid: n.sid })}>
+                    Use this number
+                  </Button>
+                }
+              />
             ))}
           </div>
         </div>
       )}
 
-      <div className="space-y-1.5">
-        <Label htmlFor="create-number-area">Buy a new number</Label>
-        <div className="flex items-center gap-2">
-          <Input
-            id="create-number-area"
-            value={areaCode}
-            onChange={(e) => setAreaCode(e.target.value)}
-            placeholder="Area code, e.g. 954"
-            className="max-w-45"
-          />
-          <Button
-            variant="outline"
-            disabled={search.isPending}
-            onClick={() => search.mutate()}
-            aria-label="Search numbers"
-          >
-            <Search className="size-3.5" /> {search.isPending ? "Searching…" : "Search"}
+      <NumberSearch
+        id="create-number-area"
+        note="The purchase happens when the center saves; it charges the Twilio account."
+        // oxlint-disable-next-line react/no-unstable-nested-components
+        action={(n) => (
+          <Button size="sm" onClick={() => onPick({ buyNumber: n.phoneNumber })} variant="brand">
+            Choose
           </Button>
-        </div>
-        {results.length > 0 && (
-          <div className="mt-2 space-y-1.5">
-            {results.slice(0, 8).map((n) => (
-              <div
-                key={n.phoneNumber}
-                className="flex items-center justify-between gap-2 rounded-lg border border-border/70 px-3 py-2"
-              >
-                <span className="min-w-0">
-                  <span className="block text-[13px] tabular-nums text-foreground">
-                    {n.friendlyName || n.phoneNumber}
-                  </span>
-                  <span className="block truncate text-[11.5px] text-muted-foreground">
-                    {[n.locality, n.region].filter(Boolean).join(", ") || "US"}
-                  </span>
-                </span>
-                <Button
-                  size="sm"
-                  onClick={() => onPick({ buyNumber: n.phoneNumber })}
-                  variant="brand"
-                >
-                  Choose
-                </Button>
-              </div>
-            ))}
-            <p className="text-[11.5px] text-muted-foreground">
-              The purchase happens when the center saves; it charges the Twilio account.
-            </p>
-          </div>
         )}
-      </div>
+      />
     </div>
   );
 }
@@ -624,9 +644,6 @@ function LinePicker({
  *  buy a new one, keep the webhook pointed here, or let the number go. */
 function NumberManager({ center, onChanged }: { center: Center; onChanged: () => void }) {
   const qc = useQueryClient();
-  const [areaCode, setAreaCode] = useState("");
-  const [results, setResults] = useState<AvailableNumber[]>([]);
-
   const { data: owned } = useQuery(orpc.phone.numbers.list.queryOptions());
   const unassigned = (owned ?? []).filter((n) => !n.center || n.center.id === center.id);
 
@@ -637,22 +654,10 @@ function NumberManager({ center, onChanged }: { center: Center; onChanged: () =>
     toast.success(message);
   };
 
-  const search = useMutation({
-    mutationFn: () =>
-      orpc.phone.numbers.search.call({
-        country: "US",
-        ...(areaCode.trim() ? { areaCode: areaCode.trim() } : {}),
-      }),
-    onSuccess: setResults,
-    onError: fail,
-  });
   const buy = useMutation({
     mutationFn: (num: string) =>
       orpc.phone.numbers.buy.call({ centerId: center.id, phoneNumber: num }),
-    onSuccess: () => {
-      setResults([]);
-      done("Number bought and wired up. Calls to it now reach this center.");
-    },
+    onSuccess: () => done("Number bought and wired up. Calls to it now reach this center."),
     onError: fail,
   });
   const attach = useMutation({
@@ -720,83 +725,44 @@ function NumberManager({ center, onChanged }: { center: Center; onChanged: () =>
             {unassigned
               .filter((n) => n.center === null)
               .map((n) => (
-                <div
+                <NumberRow
                   key={n.sid}
-                  className="flex items-center justify-between gap-2 rounded-lg border border-border/70 px-3 py-2"
-                >
-                  <span className="min-w-0">
-                    <span className="block text-[13px] tabular-nums text-foreground">
-                      {n.phoneNumber}
-                    </span>
-                    <span className="block truncate text-[11.5px] text-muted-foreground">
-                      {n.friendlyName || "unnamed"}
-                    </span>
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => attach.mutate(n.sid)}
-                  >
-                    Use for this center
-                  </Button>
-                </div>
+                  primary={n.phoneNumber}
+                  secondary={n.friendlyName || "unnamed"}
+                  action={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => attach.mutate(n.sid)}
+                    >
+                      Use for this center
+                    </Button>
+                  }
+                />
               ))}
           </div>
         </div>
       )}
 
-      <div className="space-y-1.5">
-        <Label htmlFor="number-area">Buy a new number</Label>
-        <div className="flex items-center gap-2">
-          <Input
-            id="number-area"
-            value={areaCode}
-            onChange={(e) => setAreaCode(e.target.value)}
-            placeholder="Area code, e.g. 954"
-            className="max-w-45"
-          />
+      <NumberSearch
+        id="number-area"
+        note="Buying charges the Twilio account and points the number's voice webhook at this deployment automatically."
+        // oxlint-disable-next-line react/no-unstable-nested-components
+        action={(n, clear) => (
           <Button
-            variant="outline"
-            disabled={search.isPending}
-            onClick={() => search.mutate()}
-            aria-label="Search numbers"
+            size="sm"
+            disabled={busy}
+            onClick={() => {
+              buy.mutate(n.phoneNumber);
+              clear();
+            }}
+            variant="brand"
           >
-            <Search className="size-3.5" /> {search.isPending ? "Searching…" : "Search"}
+            {buy.isPending ? "Buying…" : "Buy"}
           </Button>
-        </div>
-        {results.length > 0 && (
-          <div className="mt-2 space-y-1.5">
-            {results.slice(0, 8).map((n) => (
-              <div
-                key={n.phoneNumber}
-                className="flex items-center justify-between gap-2 rounded-lg border border-border/70 px-3 py-2"
-              >
-                <span className="min-w-0">
-                  <span className="block text-[13px] tabular-nums text-foreground">
-                    {n.friendlyName || n.phoneNumber}
-                  </span>
-                  <span className="block truncate text-[11.5px] text-muted-foreground">
-                    {[n.locality, n.region].filter(Boolean).join(", ") || "US"}
-                  </span>
-                </span>
-                <Button
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => buy.mutate(n.phoneNumber)}
-                  variant="brand"
-                >
-                  {buy.isPending ? "Buying…" : "Buy"}
-                </Button>
-              </div>
-            ))}
-            <p className="text-[11.5px] text-muted-foreground">
-              Buying charges the Twilio account and points the number's voice webhook at this
-              deployment automatically.
-            </p>
-          </div>
         )}
-      </div>
+      />
     </div>
   );
 }
