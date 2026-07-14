@@ -1,13 +1,6 @@
 import { ORPCError, os } from "@orpc/server";
 import { z } from "zod";
-import {
-  describeConfig,
-  getConfig,
-  GROK_REALTIME_MODELS,
-  GROK_VOICES,
-  saveConfig,
-  XAI_SUMMARY_MODELS,
-} from "./app-config";
+import { describeConfig, getConfig, saveConfig } from "./app-config";
 import {
   createCall,
   endCall,
@@ -478,12 +471,7 @@ export const router = {
     save: authed
       .input(
         z.object({
-          // The xAI key is env-only and intentionally not editable here.
-          // Dropdown fields only accept their known-good options — a stray
-          // string can never reach the xAI API.
-          grokRealtimeModel: z.enum(GROK_REALTIME_MODELS).nullable().optional(),
-          grokRealtimeVoice: z.enum(GROK_VOICES).nullable().optional(),
-          xaiSummaryModel: z.enum(XAI_SUMMARY_MODELS).nullable().optional(),
+          // xAI (key, models, voice) is env-only and not editable here.
           twilioAccountSid: z.string().trim().nullable().optional(),
           twilioAuthToken: z.string().trim().nullable().optional(),
           smtpHost: z.string().trim().nullable().optional(),

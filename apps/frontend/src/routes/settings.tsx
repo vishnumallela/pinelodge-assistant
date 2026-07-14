@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { Eye, EyeOff, Mail, Mic, PhoneCall, RotateCcw } from "lucide-react";
+import { Eye, EyeOff, Mail, PhoneCall, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -23,23 +23,17 @@ import { client, orpc, type SettingsField } from "@/lib/orpc";
 
 const GROUPS = [
   {
-    id: "xai" as const,
-    title: "xAI voice & models",
-    icon: Mic,
-    blurb: "The realtime voice that answers calls and the text model that writes summaries.",
-  },
-  {
     id: "twilio" as const,
     title: "Twilio",
     icon: PhoneCall,
     blurb:
-      "The auth token enables the phone bridge; adding the Account SID lets centers buy and wire up numbers from the Centers page.",
+      "The auth token turns on the phone line; adding the Account SID lets centers buy and wire up their own numbers.",
   },
   {
     id: "email" as const,
-    title: "Email briefs (SMTP)",
+    title: "Email briefs",
     icon: Mail,
-    blurb: "Where transfer-brief emails send from. Host + from address turn the feature on.",
+    blurb: "The SMTP mailbox that sends a staff member their brief when a call transfers to them.",
   },
 ];
 
@@ -83,7 +77,7 @@ export function SettingsPage() {
     <PageShell
       narrow
       title="Settings"
-      subtitle="Keys, models, and email — stored in the database and applied live. Clearing a field falls back to the server's environment value."
+      subtitle="Twilio and email, stored in the database and applied to the next call. Clear a field to fall back to the server's environment value."
       action={
         <Button
           disabled={!dirty || save.isPending}

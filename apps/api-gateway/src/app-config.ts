@@ -41,47 +41,15 @@ export interface ConfigFieldDef {
   help?: string;
 }
 
-/** Known-good option lists — the Settings page renders these as dropdowns
- *  and the save endpoint rejects anything else, so a stray string can never
- *  reach the xAI API. Extend here when xAI ships new models/voices. */
-export const GROK_REALTIME_MODELS = [
-  "grok-voice-think-fast-1.0",
-  "grok-voice-fast-1.0",
-  "grok-voice-latest",
-] as const;
-export const GROK_VOICES = ["ara", "eve", "leo", "rex", "sal"] as const;
-export const XAI_SUMMARY_MODELS = ["grok-4.3"] as const;
-
 /**
- * Editable fields shown on the Settings page. Order matters — it's the render
- * order. The xAI API key is deliberately NOT here: it's env-only
- * (`XAI_API_KEY`), the one credential the whole app shares, so a stored
- * override can never collide with — and silently break — the deployment key.
+ * Editable fields shown on the Settings page — only the two integrations an
+ * admin actually configures: Twilio and email. Everything xAI (the API key,
+ * the realtime model, the voice, the summary model) is env-only: the key
+ * because a stored override could collide with and silently break the
+ * deployment key, the rest because they rarely change and the voice is
+ * already tunable per call from the Voice panel.
  */
 export const CONFIG_FIELDS: readonly ConfigFieldDef[] = [
-  {
-    key: "grokRealtimeModel",
-    label: "Realtime voice model",
-    group: "xai",
-    kind: "select",
-    options: GROK_REALTIME_MODELS,
-    help: "Prefer a pinned id over -latest so the model never migrates silently.",
-  },
-  {
-    key: "grokRealtimeVoice",
-    label: "Default voice",
-    group: "xai",
-    kind: "select",
-    options: GROK_VOICES,
-  },
-  {
-    key: "xaiSummaryModel",
-    label: "Summary model",
-    group: "xai",
-    kind: "select",
-    options: XAI_SUMMARY_MODELS,
-    help: "Text model that writes call summaries and transfer briefs.",
-  },
   {
     key: "twilioAccountSid",
     label: "Account SID",
