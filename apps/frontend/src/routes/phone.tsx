@@ -7,7 +7,9 @@ import { Check, Copy, PhoneCall } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { PageShell } from "@/components/layout/PageShell";
 import { useCenter } from "@/lib/center";
+import { cardEntrance } from "@/lib/motion";
 import { orpc, type PhoneConfig } from "@/lib/orpc";
 import { AGENT_NAME } from "@/lib/receptionist-agent";
 
@@ -52,26 +54,12 @@ export function PhonePage() {
   const { data: config } = useQuery(orpc.phone.config.queryOptions());
 
   return (
-    <main className="min-h-0 flex-1 overflow-y-auto scrollbar-subtle">
-      <div className="mx-auto w-full max-w-4xl px-5 py-10 md:px-6">
-        <header className="space-y-1">
-          <h1 className="font-display text-[34px] leading-none text-foreground">Phone line</h1>
-          <p className="text-[14px] text-muted-foreground">
-            Put {AGENT_NAME} on a real phone number.
-          </p>
-        </header>
-
-        <motion.div
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
-          className="mt-8 space-y-6"
-        >
-          <CenterLines />
-          <TwilioSection config={config} />
-        </motion.div>
-      </div>
-    </main>
+    <PageShell narrow title="Phone line" subtitle={`Put ${AGENT_NAME} on a real phone number.`}>
+      <motion.div {...cardEntrance} className="mt-8 space-y-6">
+        <CenterLines />
+        <TwilioSection config={config} />
+      </motion.div>
+    </PageShell>
   );
 }
 

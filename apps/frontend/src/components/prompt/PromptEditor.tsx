@@ -131,7 +131,7 @@ export function PromptEditor({
           <Button
             disabled={!dirty || save.isPending || template.trim() === "" || greeting.trim() === ""}
             onClick={() => save.mutate({ centerId, template, greeting })}
-            className="bg-brand text-brand-foreground pf-hover:bg-brand/90"
+            variant="brand"
           >
             {save.isPending ? "Saving…" : "Save"}
           </Button>

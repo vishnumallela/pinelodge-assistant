@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+const csv = (s: string, lower = false) =>
+  s
+    .split(",")
+    .map((v) => (lower ? v.trim().toLowerCase() : v.trim()))
+    .filter(Boolean);
+
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 
@@ -21,12 +27,7 @@ const schema = z.object({
   ADMIN_EMAILS: z
     .string()
     .default("ravi@stackaisolutions.com,ashok@theranow.com")
-    .transform((s) =>
-      s
-        .split(",")
-        .map((e) => e.trim().toLowerCase())
-        .filter(Boolean),
-    )
+    .transform((s) => csv(s, true))
     .pipe(z.array(z.string().email())),
 
   // Server (PORT is injected by hosts like Railway; API_PORT is the local default)
@@ -35,12 +36,7 @@ const schema = z.object({
   AUTH_TRUSTED_ORIGINS: z
     .string()
     .default("http://localhost:3000")
-    .transform((s) =>
-      s
-        .split(",")
-        .map((o) => o.trim())
-        .filter(Boolean),
-    ),
+    .transform((s) => csv(s)),
 
   XAI_API_KEY: z.string().optional(),
   // Pinned (not the -latest alias) so the model never migrates silently.

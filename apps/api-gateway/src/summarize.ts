@@ -8,12 +8,16 @@ import type { CallSummary, TranscriptTurn } from "./schema";
 
 const CHAT_URL = "https://api.x.ai/v1/chat/completions";
 
+const JSON_BRIEF_RULES = [
+  "Use plain punctuation: never use em dashes. Never mention AI, models, or automation.",
+  "Reply with ONLY a JSON object, no prose, with these string fields:",
+];
+
 const SYSTEM = [
   "You are a front-desk supervisor at an assisted living community writing up a phone call for the record.",
   "You are given the full transcript between the receptionist (Sarah) and a caller.",
   "Write a tight, factual summary a colleague can skim. Never invent details not in the transcript.",
-  "Use plain punctuation: never use em dashes. Never mention AI, models, or automation.",
-  "Reply with ONLY a JSON object, no prose, with these string fields:",
+  ...JSON_BRIEF_RULES,
   '- "headline": one sentence capturing who called and what happened.',
   '- "caller": who the caller is and what they wanted (or "Unknown" if unclear).',
   '- "keyPoints": array of 2-4 short bullet strings of the concrete facts.',
@@ -96,8 +100,7 @@ function transferSystem(targetName: string, targetSection: string): string {
     "You are the front desk receptionist at an assisted living community.",
     `You are transferring a LIVE caller to your colleague ${targetName} in ${targetSection} RIGHT NOW, and you are writing them a one-glance brief so they pick up the phone already knowing the situation.`,
     "You are given the transcript so far between the receptionist (Sarah) and the caller. Never invent details not in the transcript.",
-    "Use plain punctuation: never use em dashes. Never mention AI, models, or automation.",
-    "Reply with ONLY a JSON object, no prose, with these string fields:",
+    ...JSON_BRIEF_RULES,
     '- "headline": one sentence: who is calling and why they are being transferred.',
     '- "caller": who the caller is and what they want (or "Unknown" if unclear).',
     '- "keyPoints": array of 2-4 short bullet strings of the concrete facts gathered so far.',

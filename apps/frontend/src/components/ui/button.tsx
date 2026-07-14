@@ -1,10 +1,11 @@
 import { cn } from "@/lib/utils";
 
-type Variant = "primary" | "secondary" | "ghost" | "outline" | "destructive";
+type Variant = "primary" | "brand" | "secondary" | "ghost" | "outline" | "destructive";
 type Size = "sm" | "md" | "lg" | "icon";
 
 const VARIANTS: Record<Variant, string> = {
   primary: "bg-foreground text-background pf-hover:bg-foreground/90 active:bg-foreground/80",
+  brand: "bg-brand text-brand-foreground pf-hover:bg-brand/90",
   secondary: "bg-secondary text-secondary-foreground pf-hover:bg-secondary/80",
   ghost: "pf-hover:bg-accent pf-hover:text-accent-foreground",
   outline: "border border-border bg-background pf-hover:bg-accent pf-hover:text-accent-foreground",
@@ -18,7 +19,7 @@ const SIZES: Record<Size, string> = {
   icon: "h-9 w-9",
 };
 
-export interface ButtonProps extends React.ComponentProps<"button"> {
+interface ButtonProps extends React.ComponentProps<"button"> {
   variant?: Variant;
   size?: Size;
 }

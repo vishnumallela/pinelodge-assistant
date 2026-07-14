@@ -29,8 +29,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { PageShell } from "@/components/layout/PageShell";
 import { useCenter } from "@/lib/center";
+import { cardEntrance, rowEntrance } from "@/lib/motion";
 import { orpc, type AvailableNumber, type Center } from "@/lib/orpc";
+import { isE164 } from "@/lib/validate";
 import { AGENT_NAME } from "@/lib/receptionist-agent";
 
 const COMMON_TIMEZONES = [
@@ -44,8 +47,6 @@ const COMMON_TIMEZONES = [
   "Asia/Kolkata",
   "Europe/London",
 ];
-
-const isE164 = (v: string) => v.trim() === "" || /^\+[1-9]\d{6,14}$/.test(v.trim());
 
 /** Every IANA zone the browser knows, common ones first — a strict dropdown,
  *  so an unparseable zone can never be submitted. */
@@ -105,124 +106,110 @@ export function CentersPage() {
   };
 
   return (
-    <main className="min-h-0 flex-1 overflow-y-auto scrollbar-subtle">
-      <div className="w-full px-5 py-10 md:px-8">
-        <header className="flex items-end justify-between gap-4">
-          <div className="space-y-1">
-            <h1 className="font-display text-[34px] leading-none text-foreground">Centers</h1>
-            <p className="text-[14px] text-muted-foreground">
-              Every location {AGENT_NAME} answers for. Each center has its own phone number, staff
-              roster, prompt, and timezone.
-            </p>
-          </div>
-          <Button
-            onClick={openCreate}
-            className="bg-brand text-brand-foreground pf-hover:bg-brand/90"
-          >
-            <Plus className="size-4" /> Add center
-          </Button>
-        </header>
-
-        <motion.div
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
-          className="mt-8 rounded-2xl border border-border/70 bg-card shadow-card"
-        >
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="pl-5">Center</TableHead>
-                <TableHead>Timezone</TableHead>
-                <TableHead>Phone line</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="pr-5" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {centers.map((row, i) => (
-                <motion.tr
-                  key={row.id}
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.25, delay: i * 0.04, ease: [0.23, 1, 0.32, 1] }}
-                  className="border-b border-border/50 last:border-0"
-                >
-                  <TableCell className="pl-5">
-                    <button
-                      type="button"
-                      onClick={() => setCenterId(row.id)}
-                      className="flex items-center gap-2 text-[14px] font-medium text-foreground pf-hover:text-brand"
-                      title="Make this the selected center"
-                    >
-                      <Building2 className="size-4 text-brand" /> {row.name}
-                    </button>
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-[12.5px] text-muted-foreground">{row.timezone}</span>
-                  </TableCell>
-                  <TableCell>
-                    <button
-                      type="button"
-                      onClick={() => openEdit(row)}
-                      title="Configure this center's number"
-                      className="tap text-left"
-                    >
-                      {row.phoneNumber ? (
-                        <span className="whitespace-nowrap text-[12.5px] tabular-nums text-foreground pf-hover:text-brand">
-                          {row.phoneNumber}
-                        </span>
-                      ) : (
-                        <span className="text-[12px] text-brand underline-offset-2 pf-hover:underline">
-                          Set up number
-                        </span>
-                      )}
-                    </button>
-                  </TableCell>
-                  <TableCell>
-                    {row.active ? (
-                      <Badge variant="success">Active</Badge>
+    <PageShell
+      title="Centers"
+      subtitle={`Every location ${AGENT_NAME} answers for. Each center has its own phone number, staff roster, prompt, and timezone.`}
+      action={
+        <Button onClick={openCreate} variant="brand">
+          <Plus className="size-4" /> Add center
+        </Button>
+      }
+    >
+      <motion.div
+        {...cardEntrance}
+        className="mt-8 rounded-2xl border border-border/70 bg-card shadow-card"
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="pl-5">Center</TableHead>
+              <TableHead>Timezone</TableHead>
+              <TableHead>Phone line</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="pr-5" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {centers.map((row, i) => (
+              <motion.tr
+                key={row.id}
+                {...rowEntrance(i)}
+                className="border-b border-border/50 last:border-0"
+              >
+                <TableCell className="pl-5">
+                  <button
+                    type="button"
+                    onClick={() => setCenterId(row.id)}
+                    className="flex items-center gap-2 text-[14px] font-medium text-foreground pf-hover:text-brand"
+                    title="Make this the selected center"
+                  >
+                    <Building2 className="size-4 text-brand" /> {row.name}
+                  </button>
+                </TableCell>
+                <TableCell>
+                  <span className="text-[12.5px] text-muted-foreground">{row.timezone}</span>
+                </TableCell>
+                <TableCell>
+                  <button
+                    type="button"
+                    onClick={() => openEdit(row)}
+                    title="Configure this center's number"
+                    className="tap text-left"
+                  >
+                    {row.phoneNumber ? (
+                      <span className="whitespace-nowrap text-[12.5px] tabular-nums text-foreground pf-hover:text-brand">
+                        {row.phoneNumber}
+                      </span>
                     ) : (
-                      <Badge variant="muted">Inactive</Badge>
+                      <span className="text-[12px] text-brand underline-offset-2 pf-hover:underline">
+                        Set up number
+                      </span>
                     )}
-                  </TableCell>
-                  <TableCell className="pr-5">
-                    <span className="flex justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`Edit ${row.name}`}
-                        className="size-8 text-muted-foreground"
-                        onClick={() => openEdit(row)}
-                      >
-                        <Pencil className="size-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`Delete ${row.name}`}
-                        className="size-8 text-muted-foreground"
-                        disabled={centers.length <= 1}
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              `Delete ${row.name}? Its staff assignments and prompt go with it; the call history is kept.`,
-                            )
-                          ) {
-                            remove.mutate({ id: row.id });
-                          }
-                        }}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
-                    </span>
-                  </TableCell>
-                </motion.tr>
-              ))}
-            </TableBody>
-          </Table>
-        </motion.div>
-      </div>
+                  </button>
+                </TableCell>
+                <TableCell>
+                  {row.active ? (
+                    <Badge variant="success">Active</Badge>
+                  ) : (
+                    <Badge variant="muted">Inactive</Badge>
+                  )}
+                </TableCell>
+                <TableCell className="pr-5">
+                  <span className="flex justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Edit ${row.name}`}
+                      className="size-8 text-muted-foreground"
+                      onClick={() => openEdit(row)}
+                    >
+                      <Pencil className="size-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Delete ${row.name}`}
+                      className="size-8 text-muted-foreground"
+                      disabled={centers.length <= 1}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Delete ${row.name}? Its staff assignments and prompt go with it; the call history is kept.`,
+                          )
+                        ) {
+                          remove.mutate({ id: row.id });
+                        }
+                      }}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </span>
+                </TableCell>
+              </motion.tr>
+            ))}
+          </TableBody>
+        </Table>
+      </motion.div>
 
       <CenterEditor
         key={editing?.id ?? "new"}
@@ -232,7 +219,7 @@ export function CentersPage() {
         numbersEnabled={config?.twilio.numbersEnabled ?? false}
         onSaved={invalidate}
       />
-    </main>
+    </PageShell>
   );
 }
 
@@ -501,11 +488,7 @@ function CenterEditor({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button
-            disabled={!valid || save.isPending}
-            onClick={() => save.mutate()}
-            className="bg-brand text-brand-foreground pf-hover:bg-brand/90"
-          >
+          <Button disabled={!valid || save.isPending} onClick={() => save.mutate()} variant="brand">
             {save.isPending ? "Saving…" : "Save"}
           </Button>
         </SheetFooter>
@@ -621,7 +604,7 @@ function LinePicker({
                 <Button
                   size="sm"
                   onClick={() => onPick({ buyNumber: n.phoneNumber })}
-                  className="bg-brand text-brand-foreground pf-hover:bg-brand/90"
+                  variant="brand"
                 >
                   Choose
                 </Button>
@@ -801,7 +784,7 @@ function NumberManager({ center, onChanged }: { center: Center; onChanged: () =>
                   size="sm"
                   disabled={busy}
                   onClick={() => buy.mutate(n.phoneNumber)}
-                  className="bg-brand text-brand-foreground pf-hover:bg-brand/90"
+                  variant="brand"
                 >
                   {buy.isPending ? "Buying…" : "Buy"}
                 </Button>

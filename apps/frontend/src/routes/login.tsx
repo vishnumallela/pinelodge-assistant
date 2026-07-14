@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { signIn } from "@/lib/auth-client";
 import { BRAND_NAME, PRODUCT_NAME } from "@/lib/config";
+import { isEmail } from "@/lib/validate";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -17,7 +18,7 @@ export function LoginPage() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     const addr = email.trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) {
+    if (addr === "" || !isEmail(addr)) {
       toast.error("Enter a valid email address.");
       return;
     }

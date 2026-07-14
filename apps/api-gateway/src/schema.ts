@@ -139,8 +139,6 @@ export const staffAssignments = pgTable(
   (t) => [uniqueIndex("staff_assignments_staff_center_unique").on(t.staffId, t.centerId)],
 );
 
-export type StaffAssignmentRow = typeof staffAssignments.$inferSelect;
-
 /** Global application settings (xAI, Twilio, SMTP…), editable in the
  *  dashboard. A row overrides the matching env var; no row = env fallback. */
 export const appSettings = pgTable("app_settings", {

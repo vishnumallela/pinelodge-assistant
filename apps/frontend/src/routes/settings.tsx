@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { PageShell } from "@/components/layout/PageShell";
+import { cardEntrance } from "@/lib/motion";
 import { client, orpc, type SettingsField } from "@/lib/orpc";
 
 /**
@@ -78,67 +80,56 @@ export function SettingsPage() {
     });
 
   return (
-    <main className="min-h-0 flex-1 overflow-y-auto scrollbar-subtle">
-      <div className="mx-auto w-full max-w-4xl px-5 py-10 md:px-6">
-        <header className="flex items-end justify-between gap-4">
-          <div className="space-y-1">
-            <h1 className="font-display text-[34px] leading-none text-foreground">Settings</h1>
-            <p className="text-[14px] text-muted-foreground">
-              Keys, models, and email — stored in the database and applied live. Clearing a field
-              falls back to the server's environment value.
-            </p>
-          </div>
-          <Button
-            disabled={!dirty || save.isPending}
-            onClick={() => save.mutate(draft)}
-            className="bg-brand text-brand-foreground pf-hover:bg-brand/90"
-          >
-            {save.isPending ? "Saving…" : dirty ? "Save changes" : "Saved"}
-          </Button>
-        </header>
-
-        {isLoading || !fields ? (
-          <div className="mt-8 h-64 animate-pulse rounded-2xl border border-border/70 bg-card" />
-        ) : (
-          <motion.div
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
-            className="mt-8 space-y-6"
-          >
-            {GROUPS.map((group) => (
-              <section
-                key={group.id}
-                className="rounded-2xl border border-border/70 bg-card p-6 shadow-card"
-              >
-                <div className="flex items-center gap-2">
-                  <group.icon className="size-4 text-brand" />
-                  <h2 className="text-[15px] font-medium text-foreground">{group.title}</h2>
-                </div>
-                <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
-                  {group.blurb}
-                </p>
-                <div className="mt-5 space-y-5">
-                  {fields
-                    .filter((f) => f.group === group.id)
-                    .map((f) => (
-                      <FieldEditor
-                        key={f.key}
-                        field={f}
-                        draft={draft[f.key]}
-                        touched={f.key in draft}
-                        onChange={(v) => set(f.key, v)}
-                        onReset={() => unset(f.key)}
-                        onClear={() => set(f.key, null)}
-                      />
-                    ))}
-                </div>
-              </section>
-            ))}
-          </motion.div>
-        )}
-      </div>
-    </main>
+    <PageShell
+      narrow
+      title="Settings"
+      subtitle="Keys, models, and email — stored in the database and applied live. Clearing a field falls back to the server's environment value."
+      action={
+        <Button
+          disabled={!dirty || save.isPending}
+          onClick={() => save.mutate(draft)}
+          variant="brand"
+        >
+          {save.isPending ? "Saving…" : dirty ? "Save changes" : "Saved"}
+        </Button>
+      }
+    >
+      {isLoading || !fields ? (
+        <div className="mt-8 h-64 animate-pulse rounded-2xl border border-border/70 bg-card" />
+      ) : (
+        <motion.div {...cardEntrance} className="mt-8 space-y-6">
+          {GROUPS.map((group) => (
+            <section
+              key={group.id}
+              className="rounded-2xl border border-border/70 bg-card p-6 shadow-card"
+            >
+              <div className="flex items-center gap-2">
+                <group.icon className="size-4 text-brand" />
+                <h2 className="text-[15px] font-medium text-foreground">{group.title}</h2>
+              </div>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+                {group.blurb}
+              </p>
+              <div className="mt-5 space-y-5">
+                {fields
+                  .filter((f) => f.group === group.id)
+                  .map((f) => (
+                    <FieldEditor
+                      key={f.key}
+                      field={f}
+                      draft={draft[f.key]}
+                      touched={f.key in draft}
+                      onChange={(v) => set(f.key, v)}
+                      onReset={() => unset(f.key)}
+                      onClear={() => set(f.key, null)}
+                    />
+                  ))}
+              </div>
+            </section>
+          ))}
+        </motion.div>
+      )}
+    </PageShell>
   );
 }
 

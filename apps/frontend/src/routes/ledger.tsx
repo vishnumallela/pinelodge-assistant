@@ -8,9 +8,12 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { motion } from "framer-motion";
-import { ChevronLeft, ChevronRight, Phone } from "lucide-react";
+import { ChevronRight, Phone } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Pager } from "@/components/ui/pager";
+import { PageShell } from "@/components/layout/PageShell";
+import { cardEntrance, rowEntrance } from "@/lib/motion";
 import { StatusStamp } from "@/components/calls/StatusStamp";
 import {
   Table,
@@ -133,128 +136,91 @@ export function LedgerPage() {
   });
 
   return (
-    <main className="min-h-0 flex-1 overflow-y-auto scrollbar-subtle">
-      <div className="w-full px-5 py-10 md:px-8">
-        <header className="flex items-end justify-between gap-4">
-          <div className="space-y-1">
-            <h1 className="font-display text-[34px] leading-none tracking-normal text-foreground">
-              Call log
-            </h1>
-            <p className="text-[14px] text-muted-foreground">
-              Every call to {center?.name ?? "this center"}, written up when it ends.
-            </p>
-          </div>
-          <Button
-            onClick={() => void startCall()}
-            className="bg-brand text-brand-foreground shadow-[0_1px_2px_rgba(154,106,47,0.25)] pf-hover:bg-brand/90"
-          >
-            <Phone className="size-4" /> New call
-          </Button>
-        </header>
-
-        <motion.div
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
-          className="mt-8 rounded-2xl border border-border/70 bg-card shadow-card"
+    <PageShell
+      title="Call log"
+      subtitle={`Every call to ${center?.name ?? "this center"}, written up when it ends.`}
+      action={
+        <Button
+          onClick={() => void startCall()}
+          variant="brand"
+          className="shadow-[0_1px_2px_rgba(154,106,47,0.25)]"
         >
-          {isLoading || centerId === "" ? (
-            <div className="m-5 h-56 animate-pulse rounded-xl bg-secondary/60" />
-          ) : calls.length === 0 ? (
-            <EmptyState onStart={() => void startCall()} />
-          ) : (
-            <>
-              <Table>
-                <TableHeader>
-                  {table.getHeaderGroups().map((hg) => (
-                    <TableRow key={hg.id}>
-                      {hg.headers.map((h) => (
-                        <TableHead
-                          key={h.id}
-                          className={`first:pl-5 last:pr-5 ${SHRINK.has(h.column.id) ? "w-px whitespace-nowrap" : ""}`}
-                        >
-                          {h.isPlaceholder
-                            ? null
-                            : flexRender(h.column.columnDef.header, h.getContext())}
-                        </TableHead>
-                      ))}
-                    </TableRow>
-                  ))}
-                </TableHeader>
-                <TableBody>
-                  {table.getRowModel().rows.map((row, i) => (
-                    <motion.tr
-                      key={row.id}
-                      initial={{ opacity: 0, y: 4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{
-                        duration: 0.25,
-                        delay: Math.min(i, 8) * 0.03,
-                        ease: [0.23, 1, 0.32, 1],
-                      }}
-                      tabIndex={0}
-                      aria-label={`Open call from ${formatWhen(row.original.startedAt)}`}
-                      onClick={() =>
+          <Phone className="size-4" /> New call
+        </Button>
+      }
+    >
+      <motion.div
+        {...cardEntrance}
+        className="mt-8 rounded-2xl border border-border/70 bg-card shadow-card"
+      >
+        {isLoading || centerId === "" ? (
+          <div className="m-5 h-56 animate-pulse rounded-xl bg-secondary/60" />
+        ) : calls.length === 0 ? (
+          <EmptyState onStart={() => void startCall()} />
+        ) : (
+          <>
+            <Table>
+              <TableHeader>
+                {table.getHeaderGroups().map((hg) => (
+                  <TableRow key={hg.id}>
+                    {hg.headers.map((h) => (
+                      <TableHead
+                        key={h.id}
+                        className={`first:pl-5 last:pr-5 ${SHRINK.has(h.column.id) ? "w-px whitespace-nowrap" : ""}`}
+                      >
+                        {h.isPlaceholder
+                          ? null
+                          : flexRender(h.column.columnDef.header, h.getContext())}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableHeader>
+              <TableBody>
+                {table.getRowModel().rows.map((row, i) => (
+                  <motion.tr
+                    key={row.id}
+                    {...rowEntrance(i)}
+                    tabIndex={0}
+                    aria-label={`Open call from ${formatWhen(row.original.startedAt)}`}
+                    onClick={() =>
+                      void navigate({
+                        to: "/calls/$callId",
+                        params: { callId: row.original.id },
+                      })
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter")
                         void navigate({
                           to: "/calls/$callId",
                           params: { callId: row.original.id },
-                        })
-                      }
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter")
-                          void navigate({
-                            to: "/calls/$callId",
-                            params: { callId: row.original.id },
-                          });
-                      }}
-                      className="cursor-pointer border-b border-border/50 transition-colors last:border-0 pf-hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none"
-                    >
-                      {row.getVisibleCells().map((cell) => (
-                        <TableCell
-                          key={cell.id}
-                          className={`first:pl-5 last:pr-5 ${SHRINK.has(cell.column.id) ? "w-px whitespace-nowrap" : ""}`}
-                        >
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                        </TableCell>
-                      ))}
-                    </motion.tr>
-                  ))}
-                </TableBody>
-              </Table>
+                        });
+                    }}
+                    className="cursor-pointer border-b border-border/50 transition-colors last:border-0 pf-hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none"
+                  >
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell
+                        key={cell.id}
+                        className={`first:pl-5 last:pr-5 ${SHRINK.has(cell.column.id) ? "w-px whitespace-nowrap" : ""}`}
+                      >
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </TableCell>
+                    ))}
+                  </motion.tr>
+                ))}
+              </TableBody>
+            </Table>
 
-              <div className="flex items-center justify-between border-t border-border/60 px-5 py-3">
-                <span className="text-[12.5px] tabular-nums text-muted-foreground">
-                  {from}&ndash;{to} of {total} calls
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <span className="mr-2 text-[12.5px] tabular-nums text-muted-foreground">
-                    Page {page} of {pageCount}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    aria-label="Previous page"
-                    disabled={page <= 1}
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  >
-                    <ChevronLeft className="size-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    aria-label="Next page"
-                    disabled={page >= pageCount}
-                    onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-                  >
-                    <ChevronRight className="size-4" />
-                  </Button>
-                </div>
-              </div>
-            </>
-          )}
-        </motion.div>
-      </div>
-    </main>
+            <Pager
+              page={page}
+              pageCount={pageCount}
+              onPage={setPage}
+              label={`${from}–${to} of ${total} calls`}
+            />
+          </>
+        )}
+      </motion.div>
+    </PageShell>
   );
 }
 
@@ -266,10 +232,7 @@ function EmptyState({ onStart }: { onStart: () => void }) {
         Place a call to the front desk and it&rsquo;ll be logged here with a written summary once it
         ends.
       </p>
-      <Button
-        onClick={onStart}
-        className="mt-6 bg-brand text-brand-foreground pf-hover:bg-brand/90"
-      >
+      <Button onClick={onStart} variant="brand" className="mt-6">
         <Phone className="size-4" /> Start the first call
       </Button>
     </div>

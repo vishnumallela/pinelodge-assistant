@@ -35,7 +35,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { PageShell } from "@/components/layout/PageShell";
 import { useCenter } from "@/lib/center";
+import { cardEntrance, rowEntrance } from "@/lib/motion";
+import { isE164, isEmail } from "@/lib/validate";
 import { orpc, type StaffInput, type StaffMember } from "@/lib/orpc";
 import { AGENT_NAME } from "@/lib/receptionist-agent";
 import { cn } from "@/lib/utils";
@@ -242,68 +245,59 @@ export function StaffPage() {
   });
 
   return (
-    <main className="min-h-0 flex-1 overflow-y-auto scrollbar-subtle">
-      <div className="w-full px-5 py-10 md:px-8">
-        <header className="flex items-end justify-between gap-4">
-          <div className="space-y-1">
-            <h1 className="font-display text-[34px] leading-none text-foreground">Staff</h1>
-            <p className="text-[14px] text-muted-foreground">
-              Who {AGENT_NAME} can redirect {center ? `${center.name} callers` : "callers"} to, and
-              when they're reachable. The starred person catches everything else.
-            </p>
-          </div>
-          <Button
-            onClick={openCreate}
-            className="bg-brand text-brand-foreground pf-hover:bg-brand/90"
-          >
-            <Plus className="size-4" /> Add person
-          </Button>
-        </header>
-
-        <motion.div
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
-          className="mt-8 rounded-2xl border border-border/70 bg-card shadow-card"
-        >
-          {isLoading ? (
-            <div className="m-5 h-56 animate-pulse rounded-xl bg-secondary/60" />
-          ) : (
-            <Table>
-              <TableHeader>
-                {table.getHeaderGroups().map((hg) => (
-                  <TableRow key={hg.id}>
-                    {hg.headers.map((h) => (
-                      <TableHead key={h.id} className="first:pl-5 last:pr-5">
-                        {h.isPlaceholder
-                          ? null
-                          : flexRender(h.column.columnDef.header, h.getContext())}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                ))}
-              </TableHeader>
-              <TableBody>
-                {table.getRowModel().rows.map((row, i) => (
-                  <motion.tr
-                    key={row.id}
-                    initial={{ opacity: 0, y: 4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.25, delay: i * 0.04, ease: [0.23, 1, 0.32, 1] }}
-                    className="border-b border-border/50 last:border-0"
-                  >
-                    {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id} className="first:pl-5 last:pr-5">
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </TableCell>
-                    ))}
-                  </motion.tr>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </motion.div>
-      </div>
+    <PageShell
+      title="Staff"
+      subtitle={
+        <>
+          Who {AGENT_NAME} can redirect {center ? `${center.name} callers` : "callers"} to, and when
+          they're reachable. The starred person catches everything else.
+        </>
+      }
+      action={
+        <Button onClick={openCreate} variant="brand">
+          <Plus className="size-4" /> Add person
+        </Button>
+      }
+    >
+      <motion.div
+        {...cardEntrance}
+        className="mt-8 rounded-2xl border border-border/70 bg-card shadow-card"
+      >
+        {isLoading ? (
+          <div className="m-5 h-56 animate-pulse rounded-xl bg-secondary/60" />
+        ) : (
+          <Table>
+            <TableHeader>
+              {table.getHeaderGroups().map((hg) => (
+                <TableRow key={hg.id}>
+                  {hg.headers.map((h) => (
+                    <TableHead key={h.id} className="first:pl-5 last:pr-5">
+                      {h.isPlaceholder
+                        ? null
+                        : flexRender(h.column.columnDef.header, h.getContext())}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              ))}
+            </TableHeader>
+            <TableBody>
+              {table.getRowModel().rows.map((row, i) => (
+                <motion.tr
+                  key={row.id}
+                  {...rowEntrance(i)}
+                  className="border-b border-border/50 last:border-0"
+                >
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell key={cell.id} className="first:pl-5 last:pr-5">
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableCell>
+                  ))}
+                </motion.tr>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </motion.div>
 
       <StaffEditor
         key={`${centerId}:${editing?.id ?? "new"}`}
@@ -313,7 +307,7 @@ export function StaffPage() {
         centerId={centerId}
         onSaved={invalidate}
       />
-    </main>
+    </PageShell>
   );
 }
 
@@ -394,8 +388,8 @@ function StaffEditor({
     onError: (e) => toast.error(e.message),
   });
 
-  const phoneOk = form.phone.trim() === "" || /^\+[1-9]\d{6,14}$/.test(form.phone.trim());
-  const emailOk = form.email.trim() === "" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim());
+  const phoneOk = isE164(form.phone);
+  const emailOk = isEmail(form.email);
   const valid =
     form.name.trim() !== "" &&
     form.section.trim() !== "" &&
@@ -627,11 +621,7 @@ function StaffEditor({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button
-            disabled={!valid || save.isPending}
-            onClick={() => save.mutate()}
-            className="bg-brand text-brand-foreground pf-hover:bg-brand/90"
-          >
+          <Button disabled={!valid || save.isPending} onClick={() => save.mutate()} variant="brand">
             {save.isPending ? "Saving…" : "Save"}
           </Button>
         </SheetFooter>
