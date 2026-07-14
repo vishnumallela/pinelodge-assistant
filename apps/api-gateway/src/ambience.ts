@@ -3,6 +3,15 @@
  * line at a real desk instead of in a dead-silent studio. Off by default,
  * enabled per center.
  *
+ * The loop — prefers a REAL office recording dropped in at
+ * `src/assets/room-tone.ulaw` (raw 8 kHz mono G.711 μ-law, no header) for
+ * genuine texture; falls back to a procedural "office air" tone when no file
+ * is present, so the feature always works. To add a recording, convert any
+ * clip (ideally 20-60 s of steady office ambience) with ffmpeg:
+ *
+ *   ffmpeg -i office.wav -ac 1 -ar 8000 -f mulaw \
+ *     apps/api-gateway/src/assets/room-tone.ulaw
+ *
  * Realism model — a real phone mic is always open, so the caller hears the
  * room continuously: under the agent's voice, in her pauses, and even while
  * they themselves speak. The bridge keeps ONE continuous ambience timeline
@@ -17,6 +26,9 @@
  * and mixing adds at most half a quantization step of error, below the noise
  * floor μ-law itself already has (~38 dB SNR). Nothing is resampled.
  */
+
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const BIAS = 0x84;
 const CLIP = 32635;
@@ -54,25 +66,44 @@ function linearToMuLaw(input: number): number {
   return ~(sign | (exponent << 4) | mantissa) & 0xff;
 }
 
+/** Peak-normalize float samples into a seamless Int16 loop: the first `fade`
+ *  samples crossfade with the tail so the wrap is inaudible, and the whole
+ *  thing is scaled to 16-bit full scale so a caller-facing gain of ~0.08
+ *  lands around -22 dBFS — barely there. Shared by the procedural tone and
+ *  the real recording. */
+function sealLoop(samples: Float32Array, fade: number): Int16Array {
+  const len = samples.length - fade;
+  let peak = 1e-6;
+  for (let i = 0; i < samples.length; i++) {
+    const a = Math.abs(samples[i]!);
+    if (a > peak) peak = a;
+  }
+  const norm = 32767 / peak;
+  const out = new Int16Array(len);
+  for (let i = fade; i < len; i++) out[i] = Math.round(samples[i]! * norm);
+  for (let i = 0; i < fade; i++) {
+    const w = i / fade;
+    out[i] = Math.round((samples[i]! * w + samples[len + i]! * (1 - w)) * norm);
+  }
+  return out;
+}
+
 /** A seamless 24 s "office air" loop at 8 kHz — band-shaped noise (HVAC-like
  *  hiss plus a little low body) with slow, loop-aligned level drift so the
  *  room breathes instead of hissing like static. The energy sits in the
  *  200–2000 Hz band the narrowband phone path actually reproduces; a pure
- *  sub-100 Hz rumble would be inaudible mud through a handset. Procedural
- *  only — no samples, no assets, nothing to glitch or noticeably repeat.
- *  Peak-normalized to 16-bit so a caller-facing gain of ~0.08 lands around
- *  -22 dBFS peak — barely there. Built once at boot; the crossfaded ends and
- *  whole-cycle drift make the wrap inaudible. */
-const LOOP = (() => {
+ *  sub-100 Hz rumble would be inaudible mud through a handset. The fallback
+ *  when no real recording is present. */
+function buildProceduralLoop(): Int16Array {
   const seconds = 24;
   const fade = 400;
   const len = seconds * RATE;
   const gen = new Float32Array(len + fade);
 
   // One-pole coefficients, tuned for the 8 kHz narrowband path.
-  const air = 1 - Math.exp((-2 * Math.PI * 1200) / RATE); // gentle downward tilt
-  const hpA = Math.exp((-2 * Math.PI * 180) / RATE); // remove sub-band mud
-  const bodyK = 1 - Math.exp((-2 * Math.PI * 120) / RATE); // low warmth
+  const air = 1 - Math.exp((-2 * Math.PI * 1200) / RATE);
+  const hpA = Math.exp((-2 * Math.PI * 180) / RATE);
+  const bodyK = 1 - Math.exp((-2 * Math.PI * 120) / RATE);
 
   const tau = 2 * Math.PI;
   let lp1 = 0;
@@ -80,30 +111,42 @@ const LOOP = (() => {
   let hp = 0;
   let hpPrev = 0;
   let body = 0;
-  let peak = 1e-6;
   for (let i = 0; i < gen.length; i++) {
     const white = Math.random() * 2 - 1;
     lp1 += air * (white - lp1);
-    lp2 += air * (lp1 - lp2); // two poles → pink-ish "air"
+    lp2 += air * (lp1 - lp2);
     hp = hpA * (hp + lp2 - hpPrev);
     hpPrev = lp2;
     body += bodyK * (white - body);
     // Slow swell: 3 and 7 whole cycles per loop, so the wrap stays in phase.
     const t = i / len;
     const drift = 1 + 0.22 * Math.sin(tau * 3 * t + 0.7) + 0.13 * Math.sin(tau * 7 * t + 2.1);
-    const s = (hp + 0.6 * body) * drift;
-    gen[i] = s;
-    if (Math.abs(s) > peak) peak = Math.abs(s);
+    gen[i] = (hp + 0.6 * body) * drift;
   }
-  const out = new Int16Array(len);
-  const norm = 32767 / peak;
-  for (let i = fade; i < len; i++) out[i] = Math.round(gen[i]! * norm);
-  for (let i = 0; i < fade; i++) {
-    const w = i / fade;
-    out[i] = Math.round((gen[i]! * w + gen[len + i]! * (1 - w)) * norm);
+  return sealLoop(gen, fade);
+}
+
+/** Load a real office recording from `src/assets/room-tone.ulaw` (raw 8 kHz
+ *  mono μ-law) if present, decode it to PCM, and seal it into a gapless loop.
+ *  Returns null when there is no usable file, so we fall back to procedural. */
+function loadRealLoop(): Int16Array | null {
+  const path = join(import.meta.dir, "assets", "room-tone.ulaw");
+  if (!existsSync(path)) return null;
+  try {
+    const bytes = readFileSync(path);
+    const fade = 800; // 100 ms crossfade hides the seam of an arbitrary clip
+    if (bytes.length < RATE + fade) return null; // too short to loop cleanly
+    const pcm = new Float32Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) pcm[i] = muLawToLinear(bytes[i]!);
+    return sealLoop(pcm, fade);
+  } catch {
+    return null;
   }
-  return out;
-})();
+}
+
+/** The active room-tone loop: a real recording when one is dropped in,
+ *  otherwise the procedural fallback. Resolved once at boot. */
+const LOOP = loadRealLoop() ?? buildProceduralLoop();
 
 /** Clamp a per-center ambience level (percent, 1–25) to a caller-facing gain,
  *  or 0 when disabled — 0 means the bridge forwards the agent audio untouched

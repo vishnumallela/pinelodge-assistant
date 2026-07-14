@@ -41,7 +41,10 @@ const schema = z.object({
   XAI_API_KEY: z.string().optional(),
   // Pinned (not the -latest alias) so the model never migrates silently.
   GROK_REALTIME_MODEL: z.string().default("grok-voice-think-fast-1.0"),
-  GROK_REALTIME_VOICE: z.string().default("ara"),
+  // "eve" is xAI's warm, professional customer-support voice (their own
+  // support-agent example uses it, and it's the API default) — the right fit
+  // for a front-desk receptionist. Override per deployment with the env var.
+  GROK_REALTIME_VOICE: z.string().default("eve"),
   // Text model that writes the post-call summary (never the realtime model).
   XAI_SUMMARY_MODEL: z.string().default("grok-4.3"),
 
