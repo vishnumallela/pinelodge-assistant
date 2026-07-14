@@ -113,6 +113,7 @@ const centerFieldsSchema = z.object({
   ambienceEnabled: z.boolean().optional(),
   ambienceLevel: z.number().int().min(1).max(25).optional(),
   ambienceProfile: z.enum(AMBIENCE_PROFILES).optional(),
+  ambienceKeyboard: z.boolean().optional(),
 });
 
 async function requireCenter(centerId: string): Promise<CenterRow> {

@@ -112,6 +112,7 @@ export async function ensureSchema(): Promise<void> {
   await client`ALTER TABLE centers ADD COLUMN IF NOT EXISTS ambience_enabled boolean NOT NULL DEFAULT false`;
   await client`ALTER TABLE centers ADD COLUMN IF NOT EXISTS ambience_level integer NOT NULL DEFAULT 8`;
   await client`ALTER TABLE centers ADD COLUMN IF NOT EXISTS ambience_profile text NOT NULL DEFAULT 'office'`;
+  await client`ALTER TABLE centers ADD COLUMN IF NOT EXISTS ambience_keyboard boolean NOT NULL DEFAULT false`;
   await client`CREATE INDEX IF NOT EXISTS calls_center_created_idx ON calls (center_id, created_at DESC)`;
 
   await migrateToCenters();

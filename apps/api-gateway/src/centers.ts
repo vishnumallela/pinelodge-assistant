@@ -50,6 +50,7 @@ export interface CenterInput {
   ambienceEnabled?: boolean;
   ambienceLevel?: number;
   ambienceProfile?: string;
+  ambienceKeyboard?: boolean;
   sort?: number;
 }
 

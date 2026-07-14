@@ -194,6 +194,63 @@ export function ambienceGain(enabled: boolean, level: number): number {
   return Math.min(25, Math.max(1, Math.round(level))) / 100;
 }
 
+/** A per-call keyboard-typing layer: the shared bed plus its own gain. Rides
+ *  only in the gaps (see the bridge) — a real receptionist types while she
+ *  listens and takes notes, not while she's talking, so it never masks her
+ *  voice. */
+export interface TypingLayer {
+  bed: AmbienceLoop;
+  gain: number;
+}
+
+/** Synthesize one keystroke into `buf` at sample offset `at`: a sharp click
+ *  (high-passed noise, fast attack, quick decay) with a little low "thock" so
+ *  it reads as a mechanical key, not a tick. */
+function addKeystroke(buf: Float32Array, at: number, amp: number): void {
+  const len = 260; // ~32 ms
+  let hp = 0;
+  let prev = 0;
+  for (let i = 0; i < len && at + i < buf.length; i++) {
+    const env = i < 6 ? i / 6 : Math.exp(-(i - 6) / 55); // fast attack, exp decay
+    const white = Math.random() * 2 - 1;
+    hp = 0.85 * (hp + white - prev); // one-pole high-pass → click "snap"
+    prev = white;
+    const thock = Math.sin((2 * Math.PI * 220 * i) / RATE) * Math.exp(-i / 30); // key body
+    buf[at + i]! += amp * env * (0.8 * hp + 0.35 * thock);
+  }
+}
+
+/** A seamless ~48 s typing bed: mostly silence with occasional bursts of
+ *  keystrokes (a flurry of a few words, then a pause), like someone noting a
+ *  caller's details. Sparse and irregular, so the loop rarely sounds repeated.
+ *  The first/last second are kept silent so the wrap is a clean seam. */
+function buildTypingBed(): AmbienceLoop {
+  const seconds = 48;
+  const fade = 400;
+  const len = seconds * RATE;
+  const gen = new Float32Array(len + fade);
+  const quietEnd = RATE; // keep 1 s of silence at each end
+
+  let t = quietEnd + Math.floor(Math.random() * 4 * RATE);
+  while (t < len - quietEnd) {
+    const keys = 4 + Math.floor(Math.random() * 9); // 4–12 keystrokes per burst
+    for (let k = 0; k < keys && t < len - quietEnd; k++) {
+      addKeystroke(gen, t, 0.7 + Math.random() * 0.3);
+      t += Math.floor((0.09 + Math.random() * 0.09) * RATE); // ~5–7 keys/sec
+    }
+    t += Math.floor((2.5 + Math.random() * 5) * RATE); // 2.5–7.5 s gap between bursts
+  }
+  return sealLoop(gen, fade);
+}
+
+let TYPING_BED: AmbienceLoop | null = null;
+
+/** The shared typing bed, built once on first use. */
+export function getTypingBed(): AmbienceLoop {
+  if (!TYPING_BED) TYPING_BED = buildTypingBed();
+  return TYPING_BED;
+}
+
 /** Mix room tone into one base64 μ-law agent delta, advancing the loop
  *  cursor. The tone is ducked (see DUCK) so it sits UNDER her voice instead of
  *  competing with it. Returns the new payload, the next cursor, and the
@@ -218,20 +275,34 @@ export function mixAmbience(
   return { payload: out.toString("base64"), cursor: c, samples: ulaw.length };
 }
 
-/** One pure room-tone frame (default 20 ms / 160 samples at 8 kHz) for the
- *  gaps between agent turns, so the line never goes studio-dead. Continues
- *  the same loop cursor the mixed deltas use — one unbroken room. */
+/** One room-tone frame (default 20 ms / 160 samples at 8 kHz) for the gaps
+ *  between agent turns, so the line never goes studio-dead. Continues the same
+ *  loop cursor the mixed deltas use — one unbroken room. When a typing layer
+ *  is given, keystrokes are mixed on top (gaps only), advancing their own
+ *  cursor so the flurries stay continuous across frames. */
 export function ambienceFrame(
   loop: AmbienceLoop,
   gain: number,
   cursor: number,
+  typing: TypingLayer | null,
+  typingCursor: number,
   samples = 160,
-): { payload: string; cursor: number } {
+): { payload: string; cursor: number; typingCursor: number } {
   const out = Buffer.allocUnsafe(samples);
   let c = cursor % loop.length;
+  const bed = typing?.bed ?? null;
+  const tGain = typing?.gain ?? 0;
+  let tc = bed ? typingCursor % bed.length : typingCursor;
   for (let i = 0; i < samples; i++) {
-    out[i] = linearToMuLaw((loop[c]! * gain) | 0);
+    let pcm = loop[c]! * gain;
+    if (bed) {
+      pcm += bed[tc]! * tGain;
+      tc = tc + 1 === bed.length ? 0 : tc + 1;
+    }
+    if (pcm > 32767) pcm = 32767;
+    else if (pcm < -32768) pcm = -32768;
+    out[i] = linearToMuLaw(Math.trunc(pcm));
     c = c + 1 === loop.length ? 0 : c + 1;
   }
-  return { payload: out.toString("base64"), cursor: c };
+  return { payload: out.toString("base64"), cursor: c, typingCursor: tc };
 }

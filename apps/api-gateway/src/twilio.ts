@@ -6,7 +6,9 @@ import {
   ambienceFrame,
   ambienceGain,
   getAmbienceLoop,
+  getTypingBed,
   mixAmbience,
+  type TypingLayer,
 } from "./ambience";
 import { getConfig } from "./app-config";
 import {
@@ -258,8 +260,12 @@ class TwilioBridge {
   private ambience = 0;
   /** The center's chosen room-tone loop (preset or real recording). */
   private ambienceLoop: AmbienceLoop | null = null;
+  /** Optional keyboard-typing layer, mixed into the gaps only. */
+  private typing: TypingLayer | null = null;
   /** Position in the room-tone loop — one unbroken timeline per call. */
   private ambienceCursor = 0;
+  /** Position in the typing bed — advances only while gap tone plays. */
+  private typingCursor = 0;
   /** Gap pacer. Twilio buffers outbound media and plays it in order, so pure
    *  tone may only be sent once the wall clock has caught up with everything
    *  already queued (agent bursts arrive faster than realtime). */
@@ -366,8 +372,15 @@ class TwilioBridge {
     // dumping a backlog burst into the buffer.
     if (due - this.ambienceQueued > 4000) this.ambienceQueued = due - 320;
     while (due - this.ambienceQueued >= 160) {
-      const frame = ambienceFrame(this.ambienceLoop!, this.ambience, this.ambienceCursor);
+      const frame = ambienceFrame(
+        this.ambienceLoop!,
+        this.ambience,
+        this.ambienceCursor,
+        this.typing,
+        this.typingCursor,
+      );
       this.ambienceCursor = frame.cursor;
+      this.typingCursor = frame.typingCursor;
       this.twilio.send(
         JSON.stringify({
           event: "media",
@@ -428,7 +441,14 @@ class TwilioBridge {
     }
     this.center = center;
     this.ambience = ambienceGain(center.ambienceEnabled, center.ambienceLevel);
-    if (this.ambience > 0) this.ambienceLoop = getAmbienceLoop(center.ambienceProfile);
+    if (this.ambience > 0) {
+      this.ambienceLoop = getAmbienceLoop(center.ambienceProfile);
+      // Typing rides a touch louder than the steady tone — transients read
+      // quieter — but only in the gaps, so it never fights her voice.
+      if (center.ambienceKeyboard) {
+        this.typing = { bed: getTypingBed(), gain: Math.min(0.25, this.ambience * 1.6) };
+      }
+    }
     this.startAmbience();
     const agent = await getAgentPrompt(center.id);
     if (!agent) {

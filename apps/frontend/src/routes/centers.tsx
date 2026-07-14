@@ -250,6 +250,7 @@ function CenterEditor({
   const [ambienceProfile, setAmbienceProfile] = useState<"office" | "lobby" | "clinic">(
     (editing?.ambienceProfile as "office" | "lobby" | "clinic") ?? "office",
   );
+  const [ambienceKeyboard, setAmbienceKeyboard] = useState(editing?.ambienceKeyboard ?? false);
 
   const afterHoursFields = {
     fallbackNumber: fallbackNumber.trim(),
@@ -260,6 +261,7 @@ function CenterEditor({
     ambienceEnabled,
     ambienceLevel,
     ambienceProfile,
+    ambienceKeyboard,
   };
   // Creating only: the line picked in the one-step flow (attach or buy).
   const [line, setLine] = useState<{ attachSid?: string; buyNumber?: string } | null>(null);
@@ -469,6 +471,20 @@ function CenterEditor({
                   <p className="text-[12px] text-muted-foreground">
                     Keep it subtle — around 8% it reads as a quiet, staffed room rather than noise.
                   </p>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-[13px] font-medium text-foreground">Keyboard typing</p>
+                    <p className="text-[12px] text-muted-foreground">
+                      Soft note-taking clicks in the pauses while Sarah listens — never over her
+                      voice.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={ambienceKeyboard}
+                    onCheckedChange={setAmbienceKeyboard}
+                    aria-label="Keyboard typing"
+                  />
                 </div>
               </>
             )}
