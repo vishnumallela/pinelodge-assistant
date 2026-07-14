@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { ServerWebSocket } from "bun";
 import twilioSdk from "twilio";
+import { ambienceFrame, ambienceGain, mixAmbience } from "./ambience";
 import { getConfig } from "./app-config";
 import {
   endCall as lockCall,
@@ -244,6 +245,20 @@ class TwilioBridge {
   private transferTarget: TransferTarget | null = null;
   private transferStarted = false;
   private transferTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Front-desk room tone — caller-facing gain resolved from the center once
+   *  per call (0 = feature off, agent audio passes through untouched). A real
+   *  phone mic is always open, so the tone is continuous: mixed into agent
+   *  audio deltas and paced into the gaps between them. */
+  private ambience = 0;
+  /** Position in the room-tone loop — one unbroken timeline per call. */
+  private ambienceCursor = 0;
+  /** Gap pacer. Twilio buffers outbound media and plays it in order, so pure
+   *  tone may only be sent once the wall clock has caught up with everything
+   *  already queued (agent bursts arrive faster than realtime). */
+  private ambienceTimer: ReturnType<typeof setInterval> | null = null;
+  private ambienceEpoch = 0;
+  /** Samples queued to Twilio since the epoch — agent audio plus gap tone. */
+  private ambienceQueued = 0;
 
   constructor(twilio: TwilioSocket) {
     this.twilio = twilio;
@@ -320,6 +335,42 @@ class TwilioBridge {
     await this.openXai();
   }
 
+  /** Begin the continuous room-tone timeline (only when enabled per center).
+   *  Started the moment the center resolves — before the xAI socket even
+   *  opens — so the 1-2 s connect gap sounds like an open line, not dead
+   *  air. */
+  private startAmbience(): void {
+    if (this.ambience <= 0 || this.ambienceTimer) return;
+    this.ambienceEpoch = Date.now();
+    this.ambienceQueued = 0;
+    this.ambienceTimer = setInterval(() => this.paceAmbience(), 20);
+  }
+
+  /** Every tick: how many samples SHOULD have played by now (wall clock)
+   *  versus how many were queued; fill any gap with pure room tone. While the
+   *  agent speaks, her faster-than-realtime bursts put `queued` far ahead of
+   *  `due` and this sends nothing — the tone she carries is already mixed
+   *  into her deltas. The deficit loop self-corrects timer jitter. */
+  private paceAmbience(): void {
+    if (this.finalized || this.twilio.readyState !== 1 || !this.streamSid) return;
+    const due = Math.floor((Date.now() - this.ambienceEpoch) * 8); // 8 samples/ms
+    // After an event-loop stall, skip the timeline forward instead of
+    // dumping a backlog burst into the buffer.
+    if (due - this.ambienceQueued > 4000) this.ambienceQueued = due - 320;
+    while (due - this.ambienceQueued >= 160) {
+      const frame = ambienceFrame(this.ambience, this.ambienceCursor);
+      this.ambienceCursor = frame.cursor;
+      this.twilio.send(
+        JSON.stringify({
+          event: "media",
+          streamSid: this.streamSid,
+          media: { payload: frame.payload },
+        }),
+      );
+      this.ambienceQueued += 160;
+    }
+  }
+
   /** Redirect the live call to the target's phone through the REST API —
    *  immediate, no waiting for stream teardown. Falls back to the old
    *  close-stream → <Redirect> → <Dial> path if REST isn't possible. */
@@ -368,6 +419,8 @@ class TwilioBridge {
       return;
     }
     this.center = center;
+    this.ambience = ambienceGain(center.ambienceEnabled, center.ambienceLevel);
+    this.startAmbience();
     const agent = await getAgentPrompt(center.id);
     if (!agent) {
       this.shutdown();
@@ -493,11 +546,21 @@ class TwilioBridge {
         case "response.audio.delta": {
           const delta = ev.delta as string | undefined;
           if (delta && this.twilio.readyState === 1) {
+            let payload = delta;
+            if (this.ambience > 0) {
+              // Room tone continues under her voice on the same loop cursor
+              // the gap pacer uses — audio bytes change, the call/transfer
+              // flow never does. Queued samples advance the playhead clock.
+              const mixed = mixAmbience(delta, this.ambience, this.ambienceCursor);
+              payload = mixed.payload;
+              this.ambienceCursor = mixed.cursor;
+              this.ambienceQueued += mixed.samples;
+            }
             this.twilio.send(
               JSON.stringify({
                 event: "media",
                 streamSid: this.streamSid,
-                media: { payload: delta },
+                media: { payload },
               }),
             );
           }
@@ -507,6 +570,12 @@ class TwilioBridge {
           // Barge-in: drop whatever Twilio has buffered toward the caller.
           if (this.twilio.readyState === 1) {
             this.twilio.send(JSON.stringify({ event: "clear", streamSid: this.streamSid }));
+            // The flush discarded queued-but-unplayed audio, so the playhead
+            // snaps back to "now" — room tone resumes under the caller's
+            // voice immediately instead of waiting out discarded seconds.
+            if (this.ambienceTimer) {
+              this.ambienceQueued = Math.floor((Date.now() - this.ambienceEpoch) * 8);
+            }
           }
           break;
         case "conversation.item.input_audio_transcription.updated":
@@ -698,6 +767,7 @@ class TwilioBridge {
     this.finalized = true;
     clearTimeout(this.cap);
     if (this.transferTimer) clearTimeout(this.transferTimer);
+    if (this.ambienceTimer) clearInterval(this.ambienceTimer);
     try {
       this.xai?.close();
     } catch {

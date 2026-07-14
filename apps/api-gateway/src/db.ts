@@ -109,6 +109,8 @@ export async function ensureSchema(): Promise<void> {
   await client`ALTER TABLE centers ADD COLUMN IF NOT EXISTS after_hours_greeting text NOT NULL DEFAULT ''`;
   await client`ALTER TABLE calls ADD COLUMN IF NOT EXISTS pending_transfer jsonb`;
   await client`ALTER TABLE centers ADD COLUMN IF NOT EXISTS fallback_number text NOT NULL DEFAULT ''`;
+  await client`ALTER TABLE centers ADD COLUMN IF NOT EXISTS ambience_enabled boolean NOT NULL DEFAULT false`;
+  await client`ALTER TABLE centers ADD COLUMN IF NOT EXISTS ambience_level integer NOT NULL DEFAULT 8`;
   await client`CREATE INDEX IF NOT EXISTS calls_center_created_idx ON calls (center_id, created_at DESC)`;
 
   await migrateToCenters();

@@ -108,6 +108,9 @@ const centerFieldsSchema = z.object({
   afterHoursStart: hhmmSchema.optional(),
   afterHoursEnd: hhmmSchema.optional(),
   afterHoursGreeting: z.string().trim().max(500).optional(),
+  /** Front-desk room tone under the agent's voice (audio-only, per center). */
+  ambienceEnabled: z.boolean().optional(),
+  ambienceLevel: z.number().int().min(1).max(25).optional(),
 });
 
 async function requireCenter(centerId: string): Promise<CenterRow> {

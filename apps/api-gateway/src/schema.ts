@@ -58,6 +58,13 @@ export const centers = pgTable("centers", {
   afterHoursEnd: text("after_hours_end").notNull().default("08:00"),
   /** Spoken after-hours opener; empty = generated from the center name. */
   afterHoursGreeting: text("after_hours_greeting").notNull().default(""),
+  /** Keep soft front-desk room tone on the line for the whole call — under
+   *  the agent's voice and through the pauses — so she sounds like she's at a
+   *  real desk on an open mic, not in a dead-silent studio. Audio-only —
+   *  never affects the call or transfer flow. */
+  ambienceEnabled: boolean("ambience_enabled").notNull().default(false),
+  /** Ambience loudness as a percent of full scale (1–25); ~8 ≈ -22 dB. */
+  ambienceLevel: integer("ambience_level").notNull().default(8),
   sort: integer("sort").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

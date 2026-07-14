@@ -245,6 +245,8 @@ function CenterEditor({
   const [ahStart, setAhStart] = useState(editing?.afterHoursStart ?? "16:30");
   const [ahEnd, setAhEnd] = useState(editing?.afterHoursEnd ?? "08:00");
   const [ahGreeting, setAhGreeting] = useState(editing?.afterHoursGreeting ?? "");
+  const [ambienceEnabled, setAmbienceEnabled] = useState(editing?.ambienceEnabled ?? false);
+  const [ambienceLevel, setAmbienceLevel] = useState(editing?.ambienceLevel ?? 8);
 
   const afterHoursFields = {
     fallbackNumber: fallbackNumber.trim(),
@@ -252,6 +254,8 @@ function CenterEditor({
     afterHoursStart: ahStart,
     afterHoursEnd: ahEnd,
     afterHoursGreeting: ahGreeting.trim(),
+    ambienceEnabled,
+    ambienceLevel,
   };
   // Creating only: the line picked in the one-step flow (attach or buy).
   const [line, setLine] = useState<{ attachSid?: string; buyNumber?: string } | null>(null);
@@ -402,6 +406,48 @@ function CenterEditor({
                   </p>
                 </div>
               </>
+            )}
+          </div>
+
+          <div className="space-y-4 rounded-xl border border-border/70 bg-background p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-[13.5px] font-medium text-foreground">Front-desk ambience</p>
+                <p className="text-[12.5px] text-muted-foreground">
+                  Keeps a soft room tone on the line for the whole call — under Sarah's voice and
+                  through the pauses — like a real front desk on an open mic. Audio only, never
+                  changes how calls or transfers work.
+                </p>
+              </div>
+              <Switch
+                checked={ambienceEnabled}
+                onCheckedChange={setAmbienceEnabled}
+                aria-label="Front-desk ambience"
+              />
+            </div>
+            {ambienceEnabled && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="center-ambience-level">Level</Label>
+                  <span className="text-[12px] tabular-nums text-muted-foreground">
+                    {ambienceLevel}%
+                  </span>
+                </div>
+                <input
+                  id="center-ambience-level"
+                  aria-label="Ambience level"
+                  type="range"
+                  min={1}
+                  max={25}
+                  step={1}
+                  value={ambienceLevel}
+                  onChange={(e) => setAmbienceLevel(Number(e.target.value))}
+                  className="w-full accent-brand"
+                />
+                <p className="text-[12px] text-muted-foreground">
+                  Keep it subtle — around 8% it reads as a quiet, staffed office rather than noise.
+                </p>
+              </div>
             )}
           </div>
 

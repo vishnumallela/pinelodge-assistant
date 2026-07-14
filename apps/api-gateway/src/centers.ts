@@ -47,6 +47,8 @@ export interface CenterInput {
   afterHoursStart?: string;
   afterHoursEnd?: string;
   afterHoursGreeting?: string;
+  ambienceEnabled?: boolean;
+  ambienceLevel?: number;
   sort?: number;
 }
 
