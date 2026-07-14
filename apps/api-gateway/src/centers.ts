@@ -49,6 +49,7 @@ export interface CenterInput {
   afterHoursGreeting?: string;
   ambienceEnabled?: boolean;
   ambienceLevel?: number;
+  ambienceProfile?: string;
   sort?: number;
 }
 

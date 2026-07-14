@@ -247,6 +247,9 @@ function CenterEditor({
   const [ahGreeting, setAhGreeting] = useState(editing?.afterHoursGreeting ?? "");
   const [ambienceEnabled, setAmbienceEnabled] = useState(editing?.ambienceEnabled ?? false);
   const [ambienceLevel, setAmbienceLevel] = useState(editing?.ambienceLevel ?? 8);
+  const [ambienceProfile, setAmbienceProfile] = useState<"office" | "lobby" | "clinic">(
+    (editing?.ambienceProfile as "office" | "lobby" | "clinic") ?? "office",
+  );
 
   const afterHoursFields = {
     fallbackNumber: fallbackNumber.trim(),
@@ -256,6 +259,7 @@ function CenterEditor({
     afterHoursGreeting: ahGreeting.trim(),
     ambienceEnabled,
     ambienceLevel,
+    ambienceProfile,
   };
   // Creating only: the line picked in the one-step flow (attach or buy).
   const [line, setLine] = useState<{ attachSid?: string; buyNumber?: string } | null>(null);
@@ -426,28 +430,47 @@ function CenterEditor({
               />
             </div>
             {ambienceEnabled && (
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="center-ambience-level">Level</Label>
-                  <span className="text-[12px] tabular-nums text-muted-foreground">
-                    {ambienceLevel}%
-                  </span>
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor="center-ambience-profile">Environment</Label>
+                  <Select
+                    id="center-ambience-profile"
+                    value={ambienceProfile}
+                    onChange={(e) =>
+                      setAmbienceProfile(e.target.value as "office" | "lobby" | "clinic")
+                    }
+                  >
+                    <option value="office">Quiet office</option>
+                    <option value="lobby">Busy lobby</option>
+                    <option value="clinic">Clinic front desk</option>
+                  </Select>
+                  <p className="text-[12px] text-muted-foreground">
+                    The kind of room callers should hear behind Sarah.
+                  </p>
                 </div>
-                <input
-                  id="center-ambience-level"
-                  aria-label="Ambience level"
-                  type="range"
-                  min={1}
-                  max={25}
-                  step={1}
-                  value={ambienceLevel}
-                  onChange={(e) => setAmbienceLevel(Number(e.target.value))}
-                  className="w-full accent-brand"
-                />
-                <p className="text-[12px] text-muted-foreground">
-                  Keep it subtle — around 8% it reads as a quiet, staffed office rather than noise.
-                </p>
-              </div>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="center-ambience-level">Level</Label>
+                    <span className="text-[12px] tabular-nums text-muted-foreground">
+                      {ambienceLevel}%
+                    </span>
+                  </div>
+                  <input
+                    id="center-ambience-level"
+                    aria-label="Ambience level"
+                    type="range"
+                    min={1}
+                    max={25}
+                    step={1}
+                    value={ambienceLevel}
+                    onChange={(e) => setAmbienceLevel(Number(e.target.value))}
+                    className="w-full accent-brand"
+                  />
+                  <p className="text-[12px] text-muted-foreground">
+                    Keep it subtle — around 8% it reads as a quiet, staffed room rather than noise.
+                  </p>
+                </div>
+              </>
             )}
           </div>
 

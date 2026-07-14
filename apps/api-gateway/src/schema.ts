@@ -65,6 +65,8 @@ export const centers = pgTable("centers", {
   ambienceEnabled: boolean("ambience_enabled").notNull().default(false),
   /** Ambience loudness as a percent of full scale (1–25); ~8 ≈ -22 dB. */
   ambienceLevel: integer("ambience_level").notNull().default(8),
+  /** Which room the ambience emulates: "office" | "lobby" | "clinic". */
+  ambienceProfile: text("ambience_profile").notNull().default("office"),
   sort: integer("sort").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

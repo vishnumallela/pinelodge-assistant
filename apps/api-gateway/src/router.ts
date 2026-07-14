@@ -1,5 +1,6 @@
 import { ORPCError, os } from "@orpc/server";
 import { z } from "zod";
+import { AMBIENCE_PROFILES } from "./ambience";
 import { describeConfig, getConfig, saveConfig } from "./app-config";
 import {
   createCall,
@@ -111,6 +112,7 @@ const centerFieldsSchema = z.object({
   /** Front-desk room tone under the agent's voice (audio-only, per center). */
   ambienceEnabled: z.boolean().optional(),
   ambienceLevel: z.number().int().min(1).max(25).optional(),
+  ambienceProfile: z.enum(AMBIENCE_PROFILES).optional(),
 });
 
 async function requireCenter(centerId: string): Promise<CenterRow> {

@@ -1,7 +1,13 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { ServerWebSocket } from "bun";
 import twilioSdk from "twilio";
-import { ambienceFrame, ambienceGain, mixAmbience } from "./ambience";
+import {
+  type AmbienceLoop,
+  ambienceFrame,
+  ambienceGain,
+  getAmbienceLoop,
+  mixAmbience,
+} from "./ambience";
 import { getConfig } from "./app-config";
 import {
   endCall as lockCall,
@@ -250,6 +256,8 @@ class TwilioBridge {
    *  phone mic is always open, so the tone is continuous: mixed into agent
    *  audio deltas and paced into the gaps between them. */
   private ambience = 0;
+  /** The center's chosen room-tone loop (preset or real recording). */
+  private ambienceLoop: AmbienceLoop | null = null;
   /** Position in the room-tone loop — one unbroken timeline per call. */
   private ambienceCursor = 0;
   /** Gap pacer. Twilio buffers outbound media and plays it in order, so pure
@@ -340,7 +348,7 @@ class TwilioBridge {
    *  opens — so the 1-2 s connect gap sounds like an open line, not dead
    *  air. */
   private startAmbience(): void {
-    if (this.ambience <= 0 || this.ambienceTimer) return;
+    if (this.ambience <= 0 || !this.ambienceLoop || this.ambienceTimer) return;
     this.ambienceEpoch = Date.now();
     this.ambienceQueued = 0;
     this.ambienceTimer = setInterval(() => this.paceAmbience(), 20);
@@ -358,7 +366,7 @@ class TwilioBridge {
     // dumping a backlog burst into the buffer.
     if (due - this.ambienceQueued > 4000) this.ambienceQueued = due - 320;
     while (due - this.ambienceQueued >= 160) {
-      const frame = ambienceFrame(this.ambience, this.ambienceCursor);
+      const frame = ambienceFrame(this.ambienceLoop!, this.ambience, this.ambienceCursor);
       this.ambienceCursor = frame.cursor;
       this.twilio.send(
         JSON.stringify({
@@ -420,6 +428,7 @@ class TwilioBridge {
     }
     this.center = center;
     this.ambience = ambienceGain(center.ambienceEnabled, center.ambienceLevel);
+    if (this.ambience > 0) this.ambienceLoop = getAmbienceLoop(center.ambienceProfile);
     this.startAmbience();
     const agent = await getAgentPrompt(center.id);
     if (!agent) {
@@ -551,11 +560,16 @@ class TwilioBridge {
           const delta = ev.delta as string | undefined;
           if (delta && this.twilio.readyState === 1) {
             let payload = delta;
-            if (this.ambience > 0) {
+            if (this.ambience > 0 && this.ambienceLoop) {
               // Room tone continues under her voice on the same loop cursor
               // the gap pacer uses — audio bytes change, the call/transfer
               // flow never does. Queued samples advance the playhead clock.
-              const mixed = mixAmbience(delta, this.ambience, this.ambienceCursor);
+              const mixed = mixAmbience(
+                this.ambienceLoop,
+                delta,
+                this.ambience,
+                this.ambienceCursor,
+              );
               payload = mixed.payload;
               this.ambienceCursor = mixed.cursor;
               this.ambienceQueued += mixed.samples;
