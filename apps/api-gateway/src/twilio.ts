@@ -471,7 +471,11 @@ class TwilioBridge {
           reasoning: { effort: "none" },
           turn_detection: {
             type: "server_vad",
-            threshold: 0.6,
+            // 0.7 (up from 0.6): phone lines are noisy and, with ambience on,
+            // the caller's device echoes a little room tone back into this
+            // input — a higher bar keeps that from registering as speech and
+            // falsely cutting the agent off. 300ms silence keeps replies snappy.
+            threshold: 0.7,
             silence_duration_ms: 300,
             prefix_padding_ms: 300,
             idle_timeout_ms: 15000,

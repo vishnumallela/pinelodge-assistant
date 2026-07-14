@@ -22,6 +22,12 @@ const BIAS = 0x84;
 const CLIP = 32635;
 const RATE = 8000;
 
+/** How far the room tone drops while the agent is actually speaking. Real
+ *  desks, broadcast, and other realtime voice bots all "duck" background under
+ *  the voice: full level fills the pauses, a lower level rides under speech so
+ *  it never masks her words or feeds the caller's echo back into Grok's VAD. */
+const DUCK = 0.55;
+
 /** G.711 μ-law byte → linear PCM16. */
 function muLawToLinear(u: number): number {
   const v = ~u & 0xff;
@@ -108,8 +114,9 @@ export function ambienceGain(enabled: boolean, level: number): number {
 }
 
 /** Mix room tone into one base64 μ-law agent delta, advancing the loop
- *  cursor. Returns the new payload, the next cursor, and the frame's sample
- *  count so the bridge can advance its playhead clock. */
+ *  cursor. The tone is ducked (see DUCK) so it sits UNDER her voice instead of
+ *  competing with it. Returns the new payload, the next cursor, and the
+ *  frame's sample count so the bridge can advance its playhead clock. */
 export function mixAmbience(
   base64Ulaw: string,
   gain: number,
@@ -117,9 +124,10 @@ export function mixAmbience(
 ): { payload: string; cursor: number; samples: number } {
   const ulaw = Buffer.from(base64Ulaw, "base64");
   const out = Buffer.allocUnsafe(ulaw.length);
+  const ducked = gain * DUCK;
   let c = cursor % LOOP.length;
   for (let i = 0; i < ulaw.length; i++) {
-    let pcm = muLawToLinear(ulaw[i]!) + LOOP[c]! * gain;
+    let pcm = muLawToLinear(ulaw[i]!) + LOOP[c]! * ducked;
     c = c + 1 === LOOP.length ? 0 : c + 1;
     if (pcm > 32767) pcm = 32767;
     else if (pcm < -32768) pcm = -32768;
