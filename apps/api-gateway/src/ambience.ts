@@ -99,22 +99,26 @@ export type AmbienceLoop = Int16Array;
 
 /** Per-preset shaping for the procedural fallback. Each is band-limited to
  *  the 8 kHz phone path; they differ in brightness (`airHz`), how much low
- *  "room" body they carry (`body`), and how much the level swells over the
- *  loop (`drift`) — a quiet office barely moves, a busy lobby breathes more. */
+ *  "room" body they carry (`body`), how much the level swells over the loop
+ *  (`drift`), and how much faint distant "murmur" sits underneath (`murmur`)
+ *  — band-limited, speech-cadence noise that reads as people in the room
+ *  without any words, the cue that makes a space feel occupied not mechanical. */
 const PROFILE_SHAPE: Record<
   AmbienceProfile,
-  { airHz: number; hpHz: number; body: number; drift: number }
+  { airHz: number; hpHz: number; body: number; drift: number; murmur: number }
 > = {
-  office: { airHz: 1200, hpHz: 180, body: 0.6, drift: 0.22 },
-  lobby: { airHz: 1600, hpHz: 150, body: 0.5, drift: 0.34 },
-  clinic: { airHz: 1000, hpHz: 200, body: 0.8, drift: 0.12 },
+  office: { airHz: 1100, hpHz: 190, body: 0.55, drift: 0.2, murmur: 0.18 },
+  lobby: { airHz: 1500, hpHz: 150, body: 0.45, drift: 0.32, murmur: 0.5 },
+  clinic: { airHz: 950, hpHz: 210, body: 0.75, drift: 0.12, murmur: 0.24 },
 };
 
 /** A seamless 24 s procedural room tone at 8 kHz — band-shaped noise (HVAC-like
  *  hiss plus a little low body) with slow, loop-aligned level drift so the
- *  room breathes instead of hissing like static. The energy sits in the
- *  200–2000 Hz band the narrowband phone path actually reproduces. The
- *  fallback for a preset when no real recording is present. */
+ *  room breathes instead of hissing like static, plus a faint distant murmur
+ *  layer (band-limited noise in the speech-formant range, amplitude-modulated
+ *  at a syllabic/phrase cadence) so it reads as an occupied room, not a fan.
+ *  All energy sits in the 200–2000 Hz band the narrowband phone path
+ *  reproduces. The fallback for a preset when no real recording is present. */
 function buildProceduralLoop(profile: AmbienceProfile): Int16Array {
   const shape = PROFILE_SHAPE[profile];
   const seconds = 24;
@@ -122,10 +126,17 @@ function buildProceduralLoop(profile: AmbienceProfile): Int16Array {
   const len = seconds * RATE;
   const gen = new Float32Array(len + fade);
 
-  // One-pole coefficients, tuned for the 8 kHz narrowband path.
+  // One-pole coefficients for the room-tone bed, tuned for 8 kHz narrowband.
   const air = 1 - Math.exp((-2 * Math.PI * shape.airHz) / RATE);
   const hpA = Math.exp((-2 * Math.PI * shape.hpHz) / RATE);
   const bodyK = 1 - Math.exp((-2 * Math.PI * 120) / RATE);
+
+  // Murmur: band-pass ~300–900 Hz (speech formants) with a wandering
+  // syllable- and phrase-rate envelope, so it mumbles like distant voices.
+  const murLp = 1 - Math.exp((-2 * Math.PI * 900) / RATE);
+  const murHp = Math.exp((-2 * Math.PI * 300) / RATE);
+  const sylK = 1 - Math.exp((-2 * Math.PI * 6) / RATE);
+  const phraseK = 1 - Math.exp((-2 * Math.PI * 0.4) / RATE);
 
   const tau = 2 * Math.PI;
   let lp1 = 0;
@@ -133,6 +144,11 @@ function buildProceduralLoop(profile: AmbienceProfile): Int16Array {
   let hp = 0;
   let hpPrev = 0;
   let body = 0;
+  let mLp = 0;
+  let mHp = 0;
+  let mHpPrev = 0;
+  let syl = 0.5;
+  let phrase = 0.5;
   for (let i = 0; i < gen.length; i++) {
     const white = Math.random() * 2 - 1;
     lp1 += air * (white - lp1);
@@ -140,13 +156,24 @@ function buildProceduralLoop(profile: AmbienceProfile): Int16Array {
     hp = hpA * (hp + lp2 - hpPrev);
     hpPrev = lp2;
     body += bodyK * (white - body);
+
+    // Distant murmur, band-passed and modulated by a positive wandering env.
+    const white2 = Math.random() * 2 - 1;
+    mLp += murLp * (white2 - mLp);
+    mHp = murHp * (mHp + mLp - mHpPrev);
+    mHpPrev = mLp;
+    syl += sylK * (Math.random() - syl);
+    phrase += phraseK * (Math.random() - phrase);
+    const murmurEnv = syl * (0.35 + 0.65 * phrase);
+    const murmur = mHp * murmurEnv * shape.murmur * 3;
+
     // Slow swell in whole cycles per loop, so the wrap stays in phase.
     const t = i / len;
     const drift =
       1 +
       shape.drift * Math.sin(tau * 3 * t + 0.7) +
       shape.drift * 0.6 * Math.sin(tau * 7 * t + 2.1);
-    gen[i] = (hp + shape.body * body) * drift;
+    gen[i] = (hp + shape.body * body) * drift + murmur;
   }
   return sealLoop(gen, fade);
 }
